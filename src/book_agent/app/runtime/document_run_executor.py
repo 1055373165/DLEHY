@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from book_agent.core.ids import stable_id
 from book_agent.domain.enums import (
@@ -252,6 +252,7 @@ class DocumentRunExecutor:
                         "pending_packet_count": len(packet_ids),
                     },
                     current_stage=("translate" if packet_ids else "review"),
+                    session=session,
                 )
                 return bool(packet_ids)
 
@@ -259,7 +260,7 @@ class DocumentRunExecutor:
                 return False
 
             if any(item.status in {WorkItemStatus.PENDING, WorkItemStatus.RETRYABLE_FAILED} for item in translate_items):
-                self._update_pipeline_stage(run_id, "translate", status="running", current_stage="translate")
+                self._update_pipeline_stage(run_id, "translate", status="running", current_stage="translate", session=session)
                 claimed = execution.claim_next_work_item(
                     run_id=run_id,
                     stage=WorkItemStage.TRANSLATE,
@@ -297,12 +298,12 @@ class DocumentRunExecutor:
                         run.document_id: {"document_id": run.document_id},
                     },
                 )
-                self._update_pipeline_stage(run_id, "review", status="pending", current_stage="review")
+                self._update_pipeline_stage(run_id, "review", status="pending", current_stage="review", session=session)
                 return True
             if any(item.status == WorkItemStatus.TERMINAL_FAILED for item in review_items):
                 return False
             if any(item.status in {WorkItemStatus.PENDING, WorkItemStatus.RETRYABLE_FAILED} for item in review_items):
-                self._update_pipeline_stage(run_id, "review", status="running", current_stage="review")
+                self._update_pipeline_stage(run_id, "review", status="running", current_stage="review", session=session)
                 claimed = execution.claim_next_work_item(
                     run_id=run_id,
                     stage=WorkItemStage.REVIEW,
@@ -350,12 +351,12 @@ class DocumentRunExecutor:
                         }
                     },
                 )
-                self._update_pipeline_stage(run_id, pipeline_key, status="pending", current_stage=pipeline_key)
+                self._update_pipeline_stage(run_id, pipeline_key, status="pending", current_stage=pipeline_key, session=session)
                 return True
             if any(item.status == WorkItemStatus.TERMINAL_FAILED for item in export_items):
                 return False
             if any(item.status in {WorkItemStatus.PENDING, WorkItemStatus.RETRYABLE_FAILED} for item in export_items):
-                self._update_pipeline_stage(run_id, pipeline_key, status="running", current_stage=pipeline_key)
+                self._update_pipeline_stage(run_id, pipeline_key, status="running", current_stage=pipeline_key, session=session)
                 claimed = execution.claim_next_work_item(
                     run_id=run_id,
                     stage=WorkItemStage.EXPORT,
@@ -658,25 +659,40 @@ class DocumentRunExecutor:
         status: str,
         extra: dict[str, Any] | None = None,
         current_stage: str | None = None,
+        session: Session | None = None,
     ) -> None:
-        with session_scope(self.session_factory) as session:
-            repository = RunControlRepository(session)
-            run = repository.get_run(run_id)
-            detail = dict(run.status_detail_json or {})
-            pipeline = dict(detail.get("pipeline") or {})
-            stages = dict(pipeline.get("stages") or {})
-            stage_detail = dict(stages.get(stage_key) or {})
-            stage_detail["status"] = status
-            stage_detail["updated_at"] = _utcnow().isoformat()
-            if extra:
-                stage_detail.update(extra)
-            stages[stage_key] = stage_detail
-            pipeline["stages"] = stages
-            if current_stage is not None:
-                pipeline["current_stage"] = current_stage
-            detail["pipeline"] = pipeline
-            run.status_detail_json = detail
-            repository.save_run(run)
+        if session is not None:
+            self._do_update_pipeline_stage(session, run_id, stage_key, status, extra, current_stage)
+        else:
+            with session_scope(self.session_factory) as s:
+                self._do_update_pipeline_stage(s, run_id, stage_key, status, extra, current_stage)
+
+    def _do_update_pipeline_stage(
+        self,
+        session: Session,
+        run_id: str,
+        stage_key: str,
+        status: str,
+        extra: dict[str, Any] | None,
+        current_stage: str | None,
+    ) -> None:
+        repository = RunControlRepository(session)
+        run = repository.get_run(run_id)
+        detail = dict(run.status_detail_json or {})
+        pipeline = dict(detail.get("pipeline") or {})
+        stages = dict(pipeline.get("stages") or {})
+        stage_detail = dict(stages.get(stage_key) or {})
+        stage_detail["status"] = status
+        stage_detail["updated_at"] = _utcnow().isoformat()
+        if extra:
+            stage_detail.update(extra)
+        stages[stage_key] = stage_detail
+        pipeline["stages"] = stages
+        if current_stage is not None:
+            pipeline["current_stage"] = current_stage
+        detail["pipeline"] = pipeline
+        run.status_detail_json = detail
+        repository.save_run(run)
 
     def _sync_pipeline_status(self, run_id: str, run_status: str) -> None:
         if run_status == "succeeded":

@@ -9,7 +9,9 @@
       "Bash(pgrep -af \"uvicorn book_agent\" 2>/dev/null || echo \"No uvicorn process found\")",
       "Bash(pgrep -af \"uvicorn book_agent\" 2>/dev/null)",
       "Bash(find:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(python:*)",
+      "Bash(git stash:*)"
     ]
   }
 }
