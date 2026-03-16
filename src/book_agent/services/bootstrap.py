@@ -137,7 +137,7 @@ class IngestService:
             return SourceType.EPUB, None
         if suffix == ".pdf":
             pdf_profile = self.pdf_profiler.profile(path)
-            if pdf_profile.pdf_kind == "text_pdf":
+            if pdf_profile.pdf_kind in ("text_pdf", "mixed_pdf"):
                 return SourceType.PDF_TEXT, pdf_profile
             return SourceType.PDF_SCAN, pdf_profile
         raise ValueError(f"Unsupported source file type: {path.suffix}")
