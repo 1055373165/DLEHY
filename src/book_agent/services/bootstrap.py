@@ -137,8 +137,10 @@ class IngestService:
             return SourceType.EPUB, None
         if suffix == ".pdf":
             pdf_profile = self.pdf_profiler.profile(path)
-            if pdf_profile.pdf_kind in ("text_pdf", "mixed_pdf"):
+            if pdf_profile.pdf_kind == "text_pdf":
                 return SourceType.PDF_TEXT, pdf_profile
+            if pdf_profile.pdf_kind == "mixed_pdf":
+                return SourceType.PDF_MIXED, pdf_profile
             return SourceType.PDF_SCAN, pdf_profile
         raise ValueError(f"Unsupported source file type: {path.suffix}")
 
@@ -160,8 +162,17 @@ class ParseService:
             if isinstance(pdf_profile, dict) and pdf_profile.get("layout_risk") == "high":
                 raise ValueError("P1-A only supports low-risk or medium-risk text PDFs; layout_risk=high")
             parsed = self.pdf_parser.parse(file_path, profile=pdf_profile if isinstance(pdf_profile, dict) else None)
+        elif document.source_type == SourceType.PDF_MIXED:
+            pdf_profile = document.metadata_json.get("pdf_profile")
+            if isinstance(pdf_profile, dict) and pdf_profile.get("layout_risk") == "high":
+                raise ValueError("P1-A only supports low-risk or medium-risk text PDFs; layout_risk=high")
+            # Phase 3 will route to OcrPdfParser; for now use text extraction for available pages
+            parsed = self.pdf_parser.parse(file_path, profile=pdf_profile if isinstance(pdf_profile, dict) else None)
         elif document.source_type == SourceType.PDF_SCAN:
-            raise ValueError("OCR-required or scanned PDFs are not supported yet; text PDFs only in P1-A")
+            raise ValueError(
+                "OCR-required or scanned PDFs require surya-ocr. "
+                "Install with: pip install surya-ocr Pillow"
+            )
         else:
             raise ValueError(f"Unsupported source type: {document.source_type}")
 
@@ -224,7 +235,7 @@ class ParseService:
         parsed_chapter: ParsedChapter,
     ) -> tuple[dict[str, object], Severity | None]:
         metadata: dict[str, object] = {"href": parsed_chapter.href, **parsed_chapter.metadata}
-        if document.source_type != SourceType.PDF_TEXT:
+        if document.source_type not in {SourceType.PDF_TEXT, SourceType.PDF_MIXED}:
             return metadata, None
 
         parse_confidences = [
@@ -359,7 +370,10 @@ class SegmentationService:
         now: datetime,
     ) -> list[Sentence]:
         segmented = self.segmenter.segment_text(block.normalized_text or block.source_text)
-        if block.block_type in {BlockType.HEADING, BlockType.CODE, BlockType.FOOTNOTE, BlockType.CAPTION}:
+        if block.block_type in {
+            BlockType.HEADING, BlockType.CODE, BlockType.FOOTNOTE, BlockType.CAPTION,
+            BlockType.FIGURE, BlockType.EQUATION, BlockType.IMAGE,
+        }:
             segmented = [block.normalized_text or block.source_text]
 
         translatable, nontranslatable_reason, initial_status = translatability_for_block(

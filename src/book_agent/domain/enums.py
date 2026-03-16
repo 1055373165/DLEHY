@@ -5,6 +5,7 @@ class SourceType(StrEnum):
     EPUB = "epub"
     PDF_TEXT = "pdf_text"
     PDF_SCAN = "pdf_scan"
+    PDF_MIXED = "pdf_mixed"
 
 
 class DocumentStatus(StrEnum):
@@ -37,6 +38,9 @@ class BlockType(StrEnum):
     CODE = "code"
     TABLE = "table"
     LIST_ITEM = "list_item"
+    FIGURE = "figure"
+    EQUATION = "equation"
+    IMAGE = "image"
 
 
 class ProtectedPolicy(StrEnum):

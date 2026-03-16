@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from book_agent.core.config import get_settings
 
@@ -22,6 +23,8 @@ def build_engine(database_url: str | None = None, **kwargs) -> Engine:
         connect_args = dict(default_kwargs.get("connect_args", {}))
         connect_args.setdefault("check_same_thread", False)
         default_kwargs["connect_args"] = connect_args
+        if database_path and database_path != ":memory:":
+            default_kwargs.setdefault("poolclass", NullPool)
     default_kwargs.update(kwargs)
     engine = create_engine(url, **default_kwargs)
     if engine.dialect.name == "sqlite":

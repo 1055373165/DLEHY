@@ -31,7 +31,10 @@ def protected_policy_for_block(
 ) -> ProtectedPolicy:
     normalized_type = block_type.value if isinstance(block_type, BlockType) else block_type
     forced_translatable, _reason = _forced_translatability(source_span_json)
-    if forced_translatable is False or normalized_type in {BlockType.CODE.value, BlockType.TABLE.value}:
+    if forced_translatable is False or normalized_type in {
+        BlockType.CODE.value, BlockType.TABLE.value,
+        BlockType.FIGURE.value, BlockType.EQUATION.value, BlockType.IMAGE.value,
+    }:
         return ProtectedPolicy.PROTECT
     return ProtectedPolicy.TRANSLATE
 
@@ -43,7 +46,7 @@ def translatability_for_block(
     forced_translatable, reason = _forced_translatability(source_span_json)
     if forced_translatable is False:
         return False, reason or "nontranslatable_block", SentenceStatus.BLOCKED
-    if block_type in {BlockType.CODE, BlockType.TABLE}:
+    if block_type in {BlockType.CODE, BlockType.TABLE, BlockType.FIGURE, BlockType.EQUATION, BlockType.IMAGE}:
         return False, f"{block_type.value}_protected", SentenceStatus.PROTECTED
     return True, None, SentenceStatus.PENDING
 
