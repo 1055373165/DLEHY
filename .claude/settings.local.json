@@ -13,7 +13,8 @@
       "Bash(python:*)",
       "Bash(git stash:*)",
       "WebSearch",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
