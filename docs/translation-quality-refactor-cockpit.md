@@ -287,13 +287,14 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 已补单 packet 的临时 concept override 能力：可不写 live DB，直接做术语裁决实验
 - [x] 已完成 `context engineering -> 上下文工程` 的首个真实 single-packet execute 验证
 - [x] 已完成 `agentic AI` 三候选首轮真实对照：`智能体AI / 智能体式AI / 代理式AI`
+- [x] 已在定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71` packet 上完成 `agentic AI` 三候选真实对照
 
 ### Planned
 
 - [ ] 扩展 review 规则，把 `STYLE_DRIFT` 从高信号白名单扩到更泛化的直译腔检测
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
 - [ ] 基于 `context engineering` 实验结果，决定是否把“临时 override -> 锁定写回”升成正式术语裁决流程
-- [ ] 在定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71` packet 上再做一轮 `agentic AI` 对照，避免只根据比喻段拍板
+- [ ] 把 `agentic AI -> 智能体式AI` 作为当前首选候选，接成一次“零 token 锁定 + 单 packet 验证”闭环
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
 
 ## 8. Validation Protocol
@@ -535,3 +536,14 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - 因此目前更稳妥的判断是：
   - recipe metaphor packet 不足以最终裁决 `agentic AI`
   - 真正该作为下一轮裁决依据的，仍应是定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71`
+- 已在定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71` packet 上完成第二轮 `agentic AI` 三候选真实对照：
+  - [智能体AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/ba917844-c3b9-5689-91ad-f984703dea71.agentic_ai.execute.json)
+  - [智能体式AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/ba917844-c3b9-5689-91ad-f984703dea71.agentic_style.execute.json)
+  - [代理式AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/ba917844-c3b9-5689-91ad-f984703dea71.proxy_style.execute.json)
+  - 对照基线：[baseline_current](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/ba917844-c3b9-5689-91ad-f984703dea71.paragraph_led_current.denoised.execute.json)
+- 当前结论已经明显收敛：
+  - `智能体AI`：延续当前默认输出，概念够短，但更像内部缩写，不够出版化
+  - `代理式AI`：易懂，但明显更贴 literal policy，和我们当前整体质量方向不完全一致
+  - `智能体式AI`：在定义段里概念边界最清楚，而且把整段压成 5 个 target segments 后仍保持 `12/12` 句覆盖、`0` 低置信
+- 因此，到目前为止 `agentic AI -> 智能体式AI` 已经是当前最值得推进的首选候选，但仍有一个边界：
+  - 这还只是 packet 级实验结论，尚未写回 live 章节记忆，也还没有在后续 packet 上验证连锁效果
