@@ -288,13 +288,14 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 已完成 `context engineering -> 上下文工程` 的首个真实 single-packet execute 验证
 - [x] 已完成 `agentic AI` 三候选首轮真实对照：`智能体AI / 智能体式AI / 代理式AI`
 - [x] 已在定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71` packet 上完成 `agentic AI` 三候选真实对照
+- [x] 已完成 `agentic AI -> 智能体式AI` 的零 token 锁定写回，并在后续 packet 上完成真实连锁验证
 
 ### Planned
 
 - [ ] 扩展 review 规则，把 `STYLE_DRIFT` 从高信号白名单扩到更泛化的直译腔检测
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
 - [ ] 基于 `context engineering` 实验结果，决定是否把“临时 override -> 锁定写回”升成正式术语裁决流程
-- [ ] 把 `agentic AI -> 智能体式AI` 作为当前首选候选，接成一次“零 token 锁定 + 单 packet 验证”闭环
+- [ ] 基于本次 live chapter memory 验证结果，决定是否把 `agentic AI -> 智能体式AI` 正式提升为当前章节默认裁决
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
 
 ## 8. Validation Protocol
@@ -547,3 +548,23 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
   - `智能体式AI`：在定义段里概念边界最清楚，而且把整段压成 5 个 target segments 后仍保持 `12/12` 句覆盖、`0` 低置信
 - 因此，到目前为止 `agentic AI -> 智能体式AI` 已经是当前最值得推进的首选候选，但仍有一个边界：
   - 这还只是 packet 级实验结论，尚未写回 live 章节记忆，也还没有在后续 packet 上验证连锁效果
+- 这条边界本轮已经被打穿：
+  - 已通过 [lock_chapter_concept.py](/Users/smy/project/book-agent/scripts/lock_chapter_concept.py) 对 live chapter memory 执行零 token 锁定写回：
+    - [agentic-ai-lock.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/agentic-ai-lock.json)
+    - `snapshot_version = 101`
+    - `source_term = agentic AI`
+    - `canonical_zh = 智能体式AI`
+- 写回后，已在更下游、更干净的 packet `50e768de-0f32-5421-9a77-8b1e0182f624` 上做了真实 execute 验证：
+  - [post_lock execute](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/50e768de-0f32-5421-9a77-8b1e0182f624.post_lock.execute.json)
+  - 实际消耗：`token_in = 1843`，`token_out = 181`，`cost_usd = 0.00052755`
+- 这次连锁验证已经证明两件事：
+  - prompt 确实显式携带了 `Agentic AI => 智能体式AI (locked, seen=18)`
+  - 下游输出已从原来的  
+    `智能体AI通过吸收反馈持续改进...`  
+    收敛成  
+    `智能体式AI通过吸收反馈持续改进...`
+- 所以到当前为止，`agentic AI -> 智能体式AI` 已经不只是 packet 级候选，而是完成了：
+  - 候选比较
+  - 零 token 锁定写回
+  - 单 packet 下游连锁验证
+- 当前残余只剩最后一层决策：要不要把这条裁决正式提升为主链路默认策略，以及是否把类似流程产品化到更多高价值概念。
