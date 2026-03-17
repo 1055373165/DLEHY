@@ -284,12 +284,15 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 已确认“脚本工件 vs 进程内服务”不一致不是主链路读旧数据，而是陈旧实验工件未刷新；当前脚本与进程内结果已对齐
 - [x] 已完成首个“干净 concept memory” single-packet execute，对象仍为 `ba917844-c3b9-5689-91ad-f984703dea71`
 - [x] 已补零 token 的章节概念锁定能力：可将 `source_term -> canonical_zh` 直接写入 `chapter_translation_memory`
+- [x] 已补单 packet 的临时 concept override 能力：可不写 live DB，直接做术语裁决实验
+- [x] 已完成 `context engineering -> 上下文工程` 的首个真实 single-packet execute 验证
 
 ### Planned
 
 - [ ] 扩展 review 规则，把 `STYLE_DRIFT` 从高信号白名单扩到更泛化的直译腔检测
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
-- [ ] 用新的章节概念锁定工位，先对 `context engineering` 或 `agentic AI` 做一次单 packet 验证，再决定术语裁决流程是否进入主链路
+- [ ] 基于 `context engineering` 实验结果，决定是否把“临时 override -> 锁定写回”升成正式术语裁决流程
+- [ ] 对 `agentic AI` 做同级别单 packet 实验，比较 `智能体AI / 智能体式AI / 代理式AI` 三种候选
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
 
 ## 8. Validation Protocol
@@ -501,3 +504,20 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
   - 锁定后会 supersede 当前章节记忆快照
   - 后续 packet prompt 会显式携带 `context engineering => 上下文工程 (locked ...)`
 - 本轮没有对 live 书的真实章节记忆写入任何主观术语裁决，只把“锁定能力”补成了可用工位；后续若要给 `context engineering / agentic AI` 下注，仍然会先做单 packet 验证，再决定是否进入主链路。
+- 已新增“单 packet 临时 concept override”能力：
+  - 不写 live DB
+  - 只对实验请求临时注入 `source_term -> canonical_zh`
+  - 适合先验证术语裁决，再决定是否写回章节记忆
+- 对真实 packet `2e26e803-5d84-52ae-9b01-c5b8e07a7d93` 已完成首次 override execute：
+  - 产物：[context-engineering execute](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.paragraph_led_context_engineering_locked.execute.json)
+  - override：`context engineering = 上下文工程`
+  - 实际消耗：`token_in = 2570`，`token_out = 437`，`cost_usd = 0.00083863`
+- 这次真实结果已经证明：
+  - 核心术语 `context engineering` 可以通过临时 override 稳定拉到“上下文工程”
+  - 译文中原本的“情境工程”已经被消掉
+  - 同一 packet 里还顺带把 “证据的分量表明” 提升成了 “大量证据表明”
+- 当前残余也更清楚了：
+  - 这次 override 还没有触及 `agentic AI`
+  - “情境更准确的输出” 这种词组仍然残留在段尾，说明下一刀可以有两种方向：
+    - 继续做术语裁决实验，先把 `agentic AI` 定住
+    - 或扩大 `STYLE_DRIFT`，开始抓 `contextually accurate -> 情境更准确` 这种次一级直译腔
