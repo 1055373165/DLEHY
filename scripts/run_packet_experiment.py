@@ -14,7 +14,24 @@ from book_agent.core.config import get_settings
 from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.infra.repositories.translation import TranslationRepository
 from book_agent.services.packet_experiment import PacketExperimentOptions, PacketExperimentService
+from book_agent.workers.contracts import ConceptCandidate
 from book_agent.workers.factory import build_translation_worker
+
+
+def _parse_concept_override(raw: str) -> ConceptCandidate:
+    if "=" not in raw:
+        raise argparse.ArgumentTypeError("Concept override must use source_term=canonical_zh format.")
+    source_term, canonical_zh = raw.split("=", 1)
+    source_term = source_term.strip()
+    canonical_zh = canonical_zh.strip()
+    if not source_term or not canonical_zh:
+        raise argparse.ArgumentTypeError("Concept override must include both source_term and canonical_zh.")
+    return ConceptCandidate(
+        source_term=source_term,
+        canonical_zh=canonical_zh,
+        status="locked",
+        confidence=1.0,
+    )
 
 
 def main() -> int:
@@ -59,6 +76,13 @@ def main() -> int:
         action="store_true",
         help="Use packet brief instead of the latest chapter memory brief.",
     )
+    parser.add_argument(
+        "--concept-override",
+        action="append",
+        type=_parse_concept_override,
+        default=[],
+        help="Temporary concept override in source_term=canonical_zh form. Can be repeated.",
+    )
     args = parser.parse_args()
     args.output_path = args.output_path.resolve()
 
@@ -80,6 +104,7 @@ def main() -> int:
                     prefer_memory_chapter_brief=not args.disable_memory_brief,
                     prompt_layout=args.prompt_layout,
                     execute=args.execute,
+                    concept_overrides=tuple(args.concept_override),
                 ),
             )
         args.output_path.parent.mkdir(parents=True, exist_ok=True)

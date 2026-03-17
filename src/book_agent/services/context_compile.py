@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from book_agent.domain.models import MemorySnapshot
 from book_agent.workers.contracts import ConceptCandidate, ContextPacket, TranslatedContextBlock
@@ -13,6 +13,7 @@ class ChapterContextCompileOptions:
     include_memory_blocks: bool = True
     include_chapter_concepts: bool = True
     prefer_memory_chapter_brief: bool = True
+    concept_overrides: tuple[ConceptCandidate, ...] = field(default_factory=tuple)
 
 
 def _dedupe_translated_blocks(blocks: list[TranslatedContextBlock]) -> list[TranslatedContextBlock]:
@@ -80,6 +81,28 @@ def _memory_concepts(snapshot: MemorySnapshot | None) -> list[ConceptCandidate]:
     return concepts
 
 
+def _merge_concepts(
+    base: list[ConceptCandidate],
+    overrides: tuple[ConceptCandidate, ...],
+) -> list[ConceptCandidate]:
+    concept_map: dict[str, ConceptCandidate] = {
+        concept.source_term.casefold(): concept for concept in base if concept.source_term
+    }
+    for concept in overrides:
+        if not concept.source_term:
+            continue
+        concept_map[concept.source_term.casefold()] = concept
+    concepts = list(concept_map.values())
+    concepts.sort(
+        key=lambda concept: (
+            0 if concept.canonical_zh else 1,
+            -(concept.times_seen or 0),
+            concept.source_term.lower(),
+        )
+    )
+    return concepts[:12]
+
+
 @dataclass(slots=True)
 class ChapterContextCompiler:
     compile_version: str = "v1.chapter-memory"
@@ -94,6 +117,7 @@ class ChapterContextCompiler:
         compile_options = options or ChapterContextCompileOptions()
         memory_blocks = _memory_blocks(chapter_memory_snapshot) if compile_options.include_memory_blocks else []
         memory_concepts = _memory_concepts(chapter_memory_snapshot) if compile_options.include_chapter_concepts else []
+        merged_concepts = _merge_concepts(memory_concepts, compile_options.concept_overrides)
         merged_previous = _dedupe_translated_blocks([*memory_blocks, *packet.prev_translated_blocks])
         compiled_brief = packet.chapter_brief
         if chapter_memory_snapshot is not None and compile_options.prefer_memory_chapter_brief:
@@ -103,7 +127,7 @@ class ChapterContextCompiler:
         return packet.model_copy(
             update={
                 "chapter_brief": compiled_brief,
-                "chapter_concepts": memory_concepts,
+                "chapter_concepts": merged_concepts,
                 "prev_translated_blocks": merged_previous,
             }
         )

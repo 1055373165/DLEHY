@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -48,6 +48,7 @@ class ChapterConceptLockResult:
 @dataclass(slots=True)
 class ChapterConceptLockService:
     session: Session
+    repository: ChapterTranslationMemoryRepository = field(init=False)
 
     def __post_init__(self) -> None:
         self.repository = ChapterTranslationMemoryRepository(self.session)

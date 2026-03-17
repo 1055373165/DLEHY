@@ -40,6 +40,7 @@ from book_agent.services.packet_experiment import PacketExperimentOptions, Packe
 from book_agent.services.packet_experiment_diff import compare_experiment_payloads
 from book_agent.services.packet_experiment_scan import PacketExperimentScanService
 from book_agent.services.chapter_memory_backfill import ChapterMemoryBackfillService
+from book_agent.services.chapter_concept_lock import ChapterConceptLockService
 from book_agent.services.context_compile import ChapterContextCompileOptions, ChapterContextCompiler
 from book_agent.services.translation import TranslationService
 from book_agent.workers.factory import build_translation_worker
@@ -620,6 +621,43 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertIn("generated_at", artifacts.payload)
         self.assertEqual(len(fake_client.requests), 1)
         self.assertIn("Current Paragraph:", artifacts.payload["prompt_request"]["user_prompt"])
+
+    def test_chapter_concept_lock_updates_memory_and_prompt(self) -> None:
+        _, packet_ids = self._bootstrap_to_db()
+        target_packet_id = packet_ids[2]
+
+        with self.session_factory() as session:
+            repository = TranslationRepository(session)
+            translation_service = TranslationService(repository)
+            translation_service.execute_packet(packet_ids[0])
+            translation_service.execute_packet(packet_ids[1])
+            translation_service.execute_packet(packet_ids[2])
+            session.flush()
+
+            chapter_id = repository.load_packet_bundle(target_packet_id).context_packet.chapter_id
+            lock_result = ChapterConceptLockService(session).lock_concept(
+                chapter_id=chapter_id,
+                source_term="context engineering",
+                canonical_zh="上下文工程",
+            )
+            session.commit()
+
+        with self.session_factory() as session:
+            service = PacketExperimentService(
+                TranslationRepository(session),
+                settings=Settings(translation_backend="echo", translation_model="echo-worker"),
+            )
+            artifacts = service.run(
+                target_packet_id,
+                PacketExperimentOptions(
+                    prompt_layout="paragraph-led",
+                    execute=False,
+                ),
+            )
+
+        self.assertGreaterEqual(lock_result.snapshot_version, 2)
+        self.assertIn("context engineering => 上下文工程 (locked", artifacts.payload["prompt_request"]["user_prompt"])
+        self.assertEqual(artifacts.payload["chapter_memory_snapshot_version"], lock_result.snapshot_version)
 
     def test_packet_experiment_diff_reports_context_and_prompt_changes(self) -> None:
         baseline = {

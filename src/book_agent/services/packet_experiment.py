@@ -10,7 +10,7 @@ from book_agent.core.config import Settings
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
 from book_agent.infra.repositories.translation import TranslationRepository
 from book_agent.services.context_compile import ChapterContextCompileOptions, ChapterContextCompiler
-from book_agent.workers.contracts import TranslationUsage, TranslationWorkerOutput, TranslationWorkerResult
+from book_agent.workers.contracts import ConceptCandidate, TranslationUsage, TranslationWorkerOutput, TranslationWorkerResult
 from book_agent.workers.translator import (
     PromptLayout,
     TranslationTask,
@@ -61,6 +61,7 @@ class PacketExperimentOptions:
     prefer_memory_chapter_brief: bool = True
     prompt_layout: PromptLayout = "paragraph-led"
     execute: bool = False
+    concept_overrides: tuple[ConceptCandidate, ...] = ()
 
 
 @dataclass(slots=True)
@@ -99,6 +100,7 @@ class PacketExperimentService:
                 include_memory_blocks=options.include_memory_blocks,
                 include_chapter_concepts=options.include_chapter_concepts,
                 prefer_memory_chapter_brief=options.prefer_memory_chapter_brief,
+                concept_overrides=options.concept_overrides,
             ),
         )
 
@@ -141,6 +143,7 @@ class PacketExperimentService:
                 "prefer_memory_chapter_brief": options.prefer_memory_chapter_brief,
                 "prompt_layout": options.prompt_layout,
                 "execute": options.execute,
+                "concept_overrides": [concept.model_dump() for concept in options.concept_overrides],
             },
             "context_compile_version": self.context_compiler.compile_version,
             "chapter_memory_snapshot_id": (

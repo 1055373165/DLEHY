@@ -283,11 +283,13 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 实验工件已补来源指纹：`generated_at / database_url / chapter_memory_snapshot_id`
 - [x] 已确认“脚本工件 vs 进程内服务”不一致不是主链路读旧数据，而是陈旧实验工件未刷新；当前脚本与进程内结果已对齐
 - [x] 已完成首个“干净 concept memory” single-packet execute，对象仍为 `ba917844-c3b9-5689-91ad-f984703dea71`
+- [x] 已补零 token 的章节概念锁定能力：可将 `source_term -> canonical_zh` 直接写入 `chapter_translation_memory`
 
 ### Planned
 
 - [ ] 扩展 review 规则，把 `STYLE_DRIFT` 从高信号白名单扩到更泛化的直译腔检测
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
+- [ ] 用新的章节概念锁定工位，先对 `context engineering` 或 `agentic AI` 做一次单 packet 验证，再决定术语裁决流程是否进入主链路
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
 
 ## 8. Validation Protocol
@@ -491,3 +493,11 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
     - `正是记忆使得...成为可能` -> `正是记忆实现了...`
     - `第二章` -> `第2章`
   - 但核心术语仍残留一个更值得处理的问题：`agentic AI` 当前在这个 packet 中稳定成了 `智能体AI`，说明下一刀更应该进入“术语裁决/概念锁定”，而不是继续盲目扩大概念候选提取规则。
+- 已新增零 token 的章节概念锁定能力：
+  - 服务：[chapter_concept_lock.py](/Users/smy/project/book-agent/src/book_agent/services/chapter_concept_lock.py)
+  - 脚本：[lock_chapter_concept.py](/Users/smy/project/book-agent/scripts/lock_chapter_concept.py)
+- 这条能力允许我们在不重翻整章的前提下，直接把 `source_term -> canonical_zh` 写入 `chapter_translation_memory`，然后只对单 packet 做真实 rerun，验证术语裁决对译文的影响。
+- 已补单元回归，确认：
+  - 锁定后会 supersede 当前章节记忆快照
+  - 后续 packet prompt 会显式携带 `context engineering => 上下文工程 (locked ...)`
+- 本轮没有对 live 书的真实章节记忆写入任何主观术语裁决，只把“锁定能力”补成了可用工位；后续若要给 `context engineering / agentic AI` 下注，仍然会先做单 packet 验证，再决定是否进入主链路。
