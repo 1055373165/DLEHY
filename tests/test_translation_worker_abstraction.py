@@ -46,6 +46,7 @@ from book_agent.services.translation import TranslationService
 from book_agent.workers.factory import build_translation_worker
 from book_agent.workers.contracts import (
     AlignmentSuggestion,
+    ConceptCandidate,
     ContextPacket,
     PacketBlock,
     TranslationTargetSegment,
@@ -621,6 +622,37 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertIn("generated_at", artifacts.payload)
         self.assertEqual(len(fake_client.requests), 1)
         self.assertIn("Current Paragraph:", artifacts.payload["prompt_request"]["user_prompt"])
+
+    def test_packet_experiment_service_concept_override_applies_without_writing_memory(self) -> None:
+        _, packet_ids = self._bootstrap_to_db()
+        packet_id = packet_ids[2]
+
+        with self.session_factory() as session:
+            service = PacketExperimentService(
+                TranslationRepository(session),
+                settings=Settings(translation_backend="echo", translation_model="echo-worker"),
+            )
+            artifacts = service.run(
+                packet_id,
+                PacketExperimentOptions(
+                    prompt_layout="paragraph-led",
+                    concept_overrides=(
+                        ConceptCandidate(
+                            source_term="context engineering",
+                            canonical_zh="上下文工程",
+                            status="locked",
+                            confidence=1.0,
+                        ),
+                    ),
+                ),
+            )
+
+        self.assertIn("context engineering => 上下文工程 (locked", artifacts.payload["prompt_request"]["user_prompt"])
+        self.assertEqual(len(artifacts.payload["options"]["concept_overrides"]), 1)
+        self.assertEqual(
+            artifacts.payload["options"]["concept_overrides"][0]["canonical_zh"],
+            "上下文工程",
+        )
 
     def test_chapter_concept_lock_updates_memory_and_prompt(self) -> None:
         _, packet_ids = self._bootstrap_to_db()
