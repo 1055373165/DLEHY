@@ -286,13 +286,14 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 已补零 token 的章节概念锁定能力：可将 `source_term -> canonical_zh` 直接写入 `chapter_translation_memory`
 - [x] 已补单 packet 的临时 concept override 能力：可不写 live DB，直接做术语裁决实验
 - [x] 已完成 `context engineering -> 上下文工程` 的首个真实 single-packet execute 验证
+- [x] 已完成 `agentic AI` 三候选首轮真实对照：`智能体AI / 智能体式AI / 代理式AI`
 
 ### Planned
 
 - [ ] 扩展 review 规则，把 `STYLE_DRIFT` 从高信号白名单扩到更泛化的直译腔检测
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
 - [ ] 基于 `context engineering` 实验结果，决定是否把“临时 override -> 锁定写回”升成正式术语裁决流程
-- [ ] 对 `agentic AI` 做同级别单 packet 实验，比较 `智能体AI / 智能体式AI / 代理式AI` 三种候选
+- [ ] 在定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71` packet 上再做一轮 `agentic AI` 对照，避免只根据比喻段拍板
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
 
 ## 8. Validation Protocol
@@ -521,3 +522,16 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
   - “情境更准确的输出” 这种词组仍然残留在段尾，说明下一刀可以有两种方向：
     - 继续做术语裁决实验，先把 `agentic AI` 定住
     - 或扩大 `STYLE_DRIFT`，开始抓 `contextually accurate -> 情境更准确` 这种次一级直译腔
+- 已在更短的 recipe metaphor packet `670447b0-0bca-5df9-aea8-4f30cbcd8b1f` 上完成 `agentic AI` 的三候选真实对照：
+  - [baseline](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/670447b0-0bca-5df9-aea8-4f30cbcd8b1f.baseline.execute.json)
+  - [智能体AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/670447b0-0bca-5df9-aea8-4f30cbcd8b1f.agentic_ai.execute.json)
+  - [智能体式AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/670447b0-0bca-5df9-aea8-4f30cbcd8b1f.agentic_style.execute.json)
+  - [代理式AI](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/670447b0-0bca-5df9-aea8-4f30cbcd8b1f.proxy_style.execute.json)
+- 这组对照的当前结论不是“已经能拍板”，而是：
+  - baseline 在这个 packet 上本来就会自然收敛到“智能体AI”
+  - `智能体AI` override 没带来明显额外收益
+  - `智能体式AI` 在概念上更明确，但语感仍有轻微术语化
+  - `代理式AI` 读起来顺，但更接近当前我们想摆脱的 literal policy
+- 因此目前更稳妥的判断是：
+  - recipe metaphor packet 不足以最终裁决 `agentic AI`
+  - 真正该作为下一轮裁决依据的，仍应是定义性更强的 `ba917844-c3b9-5689-91ad-f984703dea71`
