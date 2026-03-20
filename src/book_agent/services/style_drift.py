@@ -160,6 +160,17 @@ STYLE_DRIFT_RULES = (
             "'只是个小插曲', not literary wording such as '趣闻轶事'."
         ),
     ),
+    StyleDriftRule(
+        pattern_id="profound_responsibility_literal",
+        source_pattern=re.compile(r"\bprofound sense of responsibility\b", re.IGNORECASE),
+        target_pattern=re.compile(r"(?:一种)?(?:深刻|深深)(?:的)?责任(?:感|意识)"),
+        preferred_hint="强烈的责任感 / 很强的责任意识",
+        message="英文中的强调结构被直译成偏抒情中文，技术文风发重。",
+        prompt_guidance=(
+            "For phrases like 'a profound sense of responsibility', prefer plain Chinese such as "
+            "'强烈的责任感' or '很强的责任意识', not heavy calques like '深刻的责任感'."
+        ),
+    ),
 )
 
 

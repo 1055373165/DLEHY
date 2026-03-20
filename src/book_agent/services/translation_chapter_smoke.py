@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from book_agent.services.packet_experiment import PacketExperimentArtifacts, PacketExperimentOptions, PacketExperimentService
+from book_agent.services.packet_experiment import PacketExperimentOptions, PacketExperimentService
 from book_agent.services.packet_experiment_scan import PacketExperimentScanArtifacts, PacketExperimentScanService
 from book_agent.services.style_drift import STYLE_DRIFT_RULES
 
@@ -44,6 +44,7 @@ def _style_drift_hits(payload: dict[str, Any]) -> list[str]:
 class TranslationChapterSmokeOptions:
     selected_packet_limit: int = 3
     execute_selected: bool = True
+    prefer_issue_driven_packets: bool = True
     include_memory_blocks: bool = True
     include_chapter_concepts: bool = True
     prefer_memory_chapter_brief: bool = True
@@ -110,6 +111,14 @@ class TranslationChapterSmokeService:
                     "packet_id": packet_id,
                     "memory_signal_score": entry.get("memory_signal_score"),
                     "current_sentence_count": entry.get("current_sentence_count"),
+                    "unresolved_issue_count": entry.get("unresolved_issue_count"),
+                    "unresolved_issue_types": entry.get("unresolved_issue_types"),
+                    "style_drift_issue_count": entry.get("style_drift_issue_count"),
+                    "non_style_issue_count": entry.get("non_style_issue_count"),
+                    "has_non_style_issue": entry.get("has_non_style_issue"),
+                    "mixed_issue_types": entry.get("mixed_issue_types"),
+                    "issue_priority_tier": entry.get("issue_priority_tier"),
+                    "issue_priority_reason": entry.get("issue_priority_reason"),
                     "context_sources": payload.get("context_sources"),
                     "worker_output_present": payload.get("worker_output") is not None,
                     "target_segment_count": len(((payload.get("worker_output") or {}).get("target_segments") or [])),
@@ -133,6 +142,7 @@ class TranslationChapterSmokeService:
                 "options": {
                     "selected_packet_limit": smoke_options.selected_packet_limit,
                     "execute_selected": smoke_options.execute_selected,
+                    "prefer_issue_driven_packets": smoke_options.prefer_issue_driven_packets,
                     "include_memory_blocks": smoke_options.include_memory_blocks,
                     "include_chapter_concepts": smoke_options.include_chapter_concepts,
                     "prefer_memory_chapter_brief": smoke_options.prefer_memory_chapter_brief,
@@ -150,6 +160,12 @@ class TranslationChapterSmokeService:
                     "executed_packet_count": sum(1 for item in packet_results if item["worker_output_present"]),
                     "total_style_drift_hits": total_style_hits,
                     "total_cost_usd": total_cost,
+                    "selected_mixed_issue_packet_count": sum(
+                        1 for item in packet_results if bool(item.get("mixed_issue_types"))
+                    ),
+                    "selected_non_style_issue_packet_count": sum(
+                        1 for item in packet_results if bool(item.get("has_non_style_issue"))
+                    ),
                     "zero_style_drift_packet_count": sum(
                         1 for item in packet_results if not item.get("style_drift_hits")
                     ),
@@ -168,4 +184,18 @@ class TranslationChapterSmokeService:
             selected = [entry for entry in entries if str(entry.get("packet_id")) in wanted]
             selected.sort(key=lambda item: list(options.explicit_packet_ids).index(str(item["packet_id"])))
             return selected
-        return entries[: max(0, options.selected_packet_limit)]
+        if not options.prefer_issue_driven_packets:
+            return entries[: max(0, options.selected_packet_limit)]
+        ranked = sorted(
+            entries,
+            key=lambda item: (
+                int(item.get("issue_priority_tier", 2)),
+                -int(item.get("unresolved_issue_count", 0)),
+                -int(item.get("memory_signal_score", 0)),
+                -int(item.get("memory_gain", 0)),
+                -int(item.get("concept_gain", 0)),
+                -int(item.get("current_sentence_count", 0)),
+                str(item.get("packet_id") or ""),
+            ),
+        )
+        return ranked[: max(0, options.selected_packet_limit)]

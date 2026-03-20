@@ -2785,6 +2785,58 @@ class PdfBootstrapPipelineTests(unittest.TestCase):
             "Large language model operations: Building a platform for LLMs",
         )
 
+    def test_infer_intro_page_title_keeps_article_before_deep_dive(self) -> None:
+        title = _infer_intro_page_title(
+            [
+                "Large language models: A deep dive into",
+                "language modeling I f y o u k n o w t h e e n e m y a n d k n o w y o u r s e l f ,",
+            ]
+        )
+
+        self.assertEqual(
+            title,
+            "Large language models: A deep dive into language modeling",
+        )
+
+    def test_infer_intro_page_title_keeps_article_before_deep_dive_in_single_block(self) -> None:
+        title = _infer_intro_page_title(
+            [
+                "Large language models: A deep dive into language modeling "
+                "I f y o u k n o w t h e e n e m y a n d k n o w y o u r s e l f ,",
+            ]
+        )
+
+        self.assertEqual(
+            title,
+            "Large language models: A deep dive into language modeling",
+        )
+
+    def test_infer_intro_page_title_trims_spaced_epigraph_restart(self) -> None:
+        title = _infer_intro_page_title(
+            [
+                "Data engineering f o r large language models:",
+                "Setting up for success D a t a i s l i k e g a r b a g e . Y o u \\222 d b e t t e r k n o w",
+            ]
+        )
+
+        self.assertEqual(
+            title,
+            "Data engineering for large language models: Setting up for success",
+        )
+
+    def test_infer_intro_page_title_preserves_question_title_spacing(self) -> None:
+        title = _infer_intro_page_title(
+            [
+                "Deploying an LLM on a Raspberry Pi:",
+                "How low can you go? The bitternes s of p o or quality rem ains",
+            ]
+        )
+
+        self.assertEqual(
+            title,
+            "Deploying an LLM on a Raspberry Pi: How low can you go?",
+        )
+
     def test_bootstrap_pipeline_splits_appendix_top_level_subheading_pages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf_path = Path(tmpdir) / "appendix-top-level-subheading.pdf"

@@ -211,6 +211,8 @@ _BOOK_INLINE_HEADING_MAX_WORDS = 10
 _CONTEXTUAL_IMAGE_LEGEND_START_WORDS = {"this", "these", "the"}
 _TITLE_OCTAL_ESCAPE_PATTERN = re.compile(r"\\\d{3}")
 _TITLE_SINGLE_LETTER_SEQUENCE_PATTERN = re.compile(r"\b(?:[A-Za-z]\s+){2,}[A-Za-z]\b")
+_TITLE_UPPERCASE_SENTENCE_RESTART_PATTERN = re.compile(r"\b(?:[A-Z]\s+)(?:[A-Za-z]\s+){4,}[A-Za-z]\b")
+_TITLE_CAPITAL_LEAD_FRAGMENT_PATTERN = re.compile(r"\b([A-Z])\s+([a-z]{2,})\b")
 _APPENDIX_SHORT_LABEL_LEAD_PATTERN = re.compile(r"^[A-Z](?:[).:\-])?\s+[A-Z]")
 _APPENDIX_SHORT_LABEL_PATTERN = re.compile(r"^([A-Z])(?:[).:\-])?\b")
 _APPENDIX_SECTION_SUBHEADING_PATTERN = re.compile(r"^(?P<label>[A-Z]\.\d+(?:\.\d+)*)\s+(?P<title>.+)$")
@@ -271,6 +273,8 @@ _TITLE_FRAGMENT_STOPWORDS = {
     "when",
     "while",
     "with",
+    "you",
+    "your",
 }
 _BACKMATTER_WEB_CUE_PATTERN = re.compile(r"\b(?:www\.)?[A-Za-z0-9.-]+\.(?:com|org|io|ai|dev)\b", re.IGNORECASE)
 _BACKMATTER_PRICE_CUE_PATTERN = re.compile(r"(?:[$\u00a3\u20ac]\s?\d|\b\d+\s+pages\b)", re.IGNORECASE)
@@ -493,7 +497,19 @@ def _collapse_spaced_title_artifacts(text: str) -> str:
     previous = None
     while previous != collapsed:
         previous = collapsed
-        collapsed = re.sub(r"\b([A-Z])\s+([a-z]{2,})\b", r"\1\2", collapsed)
+
+        def _merge_leading_capital_fragment(match: re.Match[str]) -> str:
+            left = match.group(1)
+            right = match.group(2)
+            if left == "A":
+                prefix = collapsed[: match.start()].rstrip()
+                previous_char = prefix[-1] if prefix else ""
+                # Preserve article-like "A deep" at the start of a title or after punctuation.
+                if not prefix or previous_char in ":;,.!?-–—(":
+                    return f"{left} {right}"
+            return f"{left}{right}"
+
+        collapsed = _TITLE_CAPITAL_LEAD_FRAGMENT_PATTERN.sub(_merge_leading_capital_fragment, collapsed)
     return collapsed
 
 
@@ -1449,7 +1465,14 @@ def _appendix_section_subheading_candidate(text: str) -> dict[str, Any] | None:
 
 
 def _trim_intro_title_tail(text: str) -> str:
-    normalized = _normalize_intro_title_artifacts(text)
+    raw_text = _normalize_pdf_signal_text(text)
+    restart_match = _TITLE_UPPERCASE_SENTENCE_RESTART_PATTERN.search(raw_text)
+    if restart_match is not None:
+        prefix = raw_text[: restart_match.start()].strip()
+        if len(_normalize_intro_title_artifacts(prefix).split()) >= 2:
+            raw_text = prefix
+
+    normalized = _normalize_intro_title_artifacts(raw_text)
     if not normalized:
         return normalized
     words = normalized.split()
@@ -1461,7 +1484,7 @@ def _trim_intro_title_tail(text: str) -> str:
         previous_word = words[index - 1] if index > 0 else ""
         if index >= 2 and lowered in _CHAPTER_TITLE_BREAK_WORDS:
             return " ".join(words[:index]).strip()
-        if index >= 2 and len(cleaned) == 1 and cleaned.isupper():
+        if index >= 2 and len(cleaned) == 1 and cleaned.isupper() and cleaned not in {"A", "I"}:
             return " ".join(words[:index]).strip()
         if (
             index >= 5
@@ -1474,23 +1497,25 @@ def _trim_intro_title_tail(text: str) -> str:
 
 
 def _infer_intro_page_title(block_texts: list[str]) -> str | None:
-    normalized_texts = [
-        _normalize_intro_title_artifacts(text)
+    normalized_pairs = [
+        (text, _normalize_intro_title_artifacts(text))
         for text in block_texts
         if _normalize_intro_title_artifacts(text)
     ]
-    if not normalized_texts:
+    if not normalized_pairs:
         return None
-    if len(normalized_texts) > 1 and _parse_page_number(normalized_texts[0]) is not None:
-        normalized_texts = normalized_texts[1:]
-    if not normalized_texts:
+    if len(normalized_pairs) > 1 and _parse_page_number(normalized_pairs[0][1]) is not None:
+        normalized_pairs = normalized_pairs[1:]
+    if not normalized_pairs:
         return None
+    raw_texts = [raw for raw, _normalized in normalized_pairs]
+    normalized_texts = [normalized for _raw, normalized in normalized_pairs]
 
     if len(normalized_texts) == 1:
-        title = _trim_intro_title_tail(normalized_texts[0])
+        title = _trim_intro_title_tail(raw_texts[0])
     else:
         prefix_parts = normalized_texts[:-1]
-        suffix = _trim_intro_title_tail(normalized_texts[-1])
+        suffix = _trim_intro_title_tail(raw_texts[-1])
         if suffix:
             prefix_parts.append(suffix)
         title = _normalize_text(" ".join(part for part in prefix_parts if part))

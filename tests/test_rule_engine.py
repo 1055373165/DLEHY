@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -159,6 +161,10 @@ class RuleEngineTests(unittest.TestCase):
             evidence_json={
                 "style_rule": "contextually_accurate_outputs_literal",
                 "preferred_hint": "更符合上下文的输出",
+                "prompt_guidance": (
+                    "Prefer '更符合上下文的输出' or an equally natural Chinese expression, "
+                    "not literal forms like '上下文更准确的输出'."
+                ),
             },
             status=IssueStatus.OPEN,
             created_at=now,
@@ -180,9 +186,10 @@ class RuleEngineTests(unittest.TestCase):
         plan = build_rerun_plan(issue, action)
 
         self.assertEqual(plan.concept_overrides, ())
-        self.assertEqual(len(plan.style_hints), 1)
-        self.assertIn("更符合上下文的输出", plan.style_hints[0])
-        self.assertIn("contextually_accurate_outputs_literal", plan.style_hints[0])
+        self.assertEqual(len(plan.style_hints), 2)
+        self.assertTrue(any("更符合上下文的输出" in hint for hint in plan.style_hints))
+        self.assertTrue(any("contextually_accurate_outputs_literal" in hint for hint in plan.style_hints))
+        self.assertTrue(any("上下文更准确的输出" in hint for hint in plan.style_hints))
 
     def test_build_rerun_plan_projects_stale_chapter_brief_to_packet_scope_when_packet_ids_present(self) -> None:
         now = datetime.now(timezone.utc)

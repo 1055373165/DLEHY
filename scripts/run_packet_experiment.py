@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -128,6 +130,12 @@ def main() -> int:
         default=[],
         help="Temporary rerun hint injected into packet open_questions. Can be repeated.",
     )
+    parser.add_argument(
+        "--review-issue-id",
+        action="append",
+        default=[],
+        help="Review issue id(s) to resolve into rerun hints/concept overrides. Can be repeated.",
+    )
     args = parser.parse_args()
     args.output_path = args.output_path.resolve()
 
@@ -158,6 +166,7 @@ def main() -> int:
                     execute=args.execute,
                     concept_overrides=tuple(args.concept_override),
                     rerun_hints=tuple(str(item) for item in args.rerun_hint),
+                    review_issue_ids=tuple(str(item) for item in args.review_issue_id),
                 ),
             )
         args.output_path.parent.mkdir(parents=True, exist_ok=True)

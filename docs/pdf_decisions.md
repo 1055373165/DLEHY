@@ -1,6 +1,6 @@
 # PDF Decisions
 
-Last Updated: 2026-03-16
+Last Updated: 2026-03-20
 
 ## Purpose
 
@@ -493,6 +493,36 @@ Consequences:
 - 这条策略的前提是假设当前最值得优化的是 chapter title surface quality，而不是整篇正文的断词修复
 - 适用边界当前只覆盖 `chapter_intro` fallback title；outline / TOC / explicit heading 路径暂时不走这套清洗
 - 验证方式是 synthetic unit tests 加 `LLMs in Production` 真实 smoke，当前至少要求 `Words awakening...` 和 `Prompt engineering...` 进入 corpus expectation
+
+---
+
+## PDF-D-037 chapter-intro title cleanup v2 要优先保真合法 title spacing，并截断 uppercase spaced-letter epigraph restart
+
+Status: Accepted
+
+Decision:
+
+- `chapter_intro` title cleanup 第二刀不再只靠“继续粘词”，而是同时做两件事：
+  - 保留合法标题间距，避免把 `A deep`、`you go` 这类正常标题误粘成 `Adeep`、`yougo`
+  - 当 intro title 后紧跟 uppercase spaced-letter 的 epigraph / quote restart 时，直接在 parser 侧截断，不让 `Dataislikegarbage` 一类句子残片泄漏进标题
+- 回归保护必须覆盖两种真实形态：
+  - 双块 title continuation
+  - 单块 `title + epigraph` 合并
+
+Why:
+
+- `LLMs in Production` 的第二批真实 title 噪声已经证明，继续无差别“并词”会把合法 article/question title 也做坏
+- 这些噪声仍然属于 chapter-intro surface cleanup，不值得扩散成通用正文断词修复
+- 如果 single-block merged title 不进入回归，真实长书仍会在 parser 里漏出 `Adeep` 这类表面退化
+
+Consequences:
+
+- title cleanup 规则从“单向更激进”升级成“更保守的误粘连保护 + 更定向的 epigraph 截断”
+- 适用边界仍限制在 `chapter_intro` fallback title，不扩散到正文 block 清洗
+- 验证方式是 synthetic intro-title tests + 真实 `LLMs in Production` parser targeted validation：page `42 / 133 / 377` 应分别恢复为
+  - `Large language models: A deep dive into language modeling`
+  - `Data engineering for large language models: Setting up for success`
+  - `Deploying an LLM on a Raspberry Pi: How low can you go?`
 
 ---
 

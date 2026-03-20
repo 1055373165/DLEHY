@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import html
 import json
 import shutil
@@ -10,7 +12,6 @@ import sys
 from unittest.mock import patch
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -203,6 +204,15 @@ DURABLE_SUBSTRATE_LITERALISM_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
   <body>
     <h1 id="ch1">Chapter One</h1>
     <p>Within this view, memory becomes the durable substrate of context, providing more than just raw recall of what has been said.</p>
+  </body>
+</html>
+"""
+
+RESPONSIBILITY_LITERALISM_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <h1 id="ch1">Chapter One</h1>
+    <p>Deploying agentic systems in production requires a profound sense of responsibility.</p>
   </body>
 </html>
 """
@@ -570,6 +580,8 @@ class LiteralismWorker:
                 )
             elif "durable substrate" in sentence.source_text:
                 text = "在这一视角下，记忆成为上下文的持久基底，其作用远不止于对已述内容的原始回忆。"
+            elif "profound sense of responsibility" in sentence.source_text:
+                text = "在生产环境中部署智能体系统需要一种深刻的责任感。"
             elif "what was known, when it was known" in sentence.source_text:
                 text = "记忆也是关于已知内容、获知时间及其对行动重要性的结构化记录。"
             elif "weight of evidence" in sentence.source_text:
@@ -635,6 +647,11 @@ class GuidanceAwareLiteralismWorker:
                     text = (
                         "本质上，证据权重表明，在推理时依赖来自最新相关来源的外部内容，往往能产生更可靠且上下文更准确的输出。"
                     )
+            elif "profound sense of responsibility" in source_text:
+                if "强烈的责任感" in open_questions or "很强的责任意识" in open_questions:
+                    text = "在生产环境中部署智能体系统需要很强的责任意识。"
+                else:
+                    text = "在生产环境中部署智能体系统需要一种深刻的责任感。"
             else:
                 text = f"译文::{source_text}"
             temp_id = f"temp-{sentence.id}"
@@ -3949,6 +3966,7 @@ class PersistenceAndReviewTests(unittest.TestCase):
             self.assertTrue(
                 any("称之为情境工程的内容" in str(issue.evidence_json.get("matched_target_excerpt") or "") for issue in style_issues)
             )
+            self.assertTrue(any(issue.evidence_json.get("prompt_guidance") for issue in style_issues))
 
     def test_review_reports_knowledge_timeline_literalism_as_non_blocking_advisory(self) -> None:
         document_id = self._bootstrap_custom_epub_to_db(
@@ -4007,6 +4025,43 @@ class PersistenceAndReviewTests(unittest.TestCase):
                 any("持久基底" in str(issue.evidence_json.get("matched_target_excerpt") or "") for issue in style_issues)
             )
 
+    def test_review_reports_profound_responsibility_literalism_as_non_blocking_advisory(self) -> None:
+        document_id = self._bootstrap_custom_epub_to_db(
+            [("Chapter One", "chapter1.xhtml", RESPONSIBILITY_LITERALISM_XHTML)]
+        )
+
+        with self.session_factory() as session:
+            bundle = BootstrapRepository(session).load_document_bundle(document_id)
+            packet_ids = [packet.id for packet in bundle.chapters[0].translation_packets]
+            service = TranslationService(TranslationRepository(session), worker=LiteralismWorker())
+            for packet_id in packet_ids:
+                service.execute_packet(packet_id)
+            session.commit()
+
+        with self.session_factory() as session:
+            bundle = BootstrapRepository(session).load_document_bundle(document_id)
+            chapter_id = bundle.chapters[0].chapter.id
+            review_artifacts = ReviewService(ReviewRepository(session)).review_chapter(chapter_id)
+            style_issues = [issue for issue in review_artifacts.issues if issue.issue_type == "STYLE_DRIFT"]
+            self.assertTrue(style_issues)
+            self.assertTrue(all(issue.root_cause_layer.value == "packet" for issue in style_issues))
+            self.assertTrue(all(not issue.blocking for issue in style_issues))
+            self.assertTrue(
+                any(
+                    issue.evidence_json.get("preferred_hint") == "强烈的责任感 / 很强的责任意识"
+                    for issue in style_issues
+                )
+            )
+            self.assertTrue(
+                any("深刻的责任感" in str(issue.evidence_json.get("matched_target_excerpt") or "") for issue in style_issues)
+            )
+            self.assertTrue(
+                any(
+                    "深刻的责任感" in str(issue.evidence_json.get("prompt_guidance") or "")
+                    for issue in style_issues
+                )
+            )
+
     def test_packet_style_drift_action_rerun_uses_aggregated_hints_and_resolves_packet_issues(self) -> None:
         document_id = self._bootstrap_custom_epub_to_db(
             [("Chapter One", "chapter1.xhtml", LITERALISM_XHTML)]
@@ -4046,6 +4101,9 @@ class PersistenceAndReviewTests(unittest.TestCase):
 
             self.assertTrue(any("大量证据表明" in hint for hint in rerun_execution.rerun_plan.style_hints))
             self.assertTrue(any("更符合上下文的输出" in hint for hint in rerun_execution.rerun_plan.style_hints))
+            self.assertTrue(
+                any("Prefer natural Chinese evidential phrasing" in hint for hint in rerun_execution.rerun_plan.style_hints)
+            )
             self.assertTrue(rerun_execution.issue_resolved)
 
             final_review = ReviewService(ReviewRepository(session)).review_chapter(chapter_id)
@@ -4925,6 +4983,7 @@ class PersistenceAndReviewTests(unittest.TestCase):
                 translation_worker=GuidanceAwareMixedWorker(),
             )
             workflow.translate_document(document_id)
+            session.commit()
             bundle = workflow.bootstrap_repository.load_document_bundle(document_id)
             chapter_id = bundle.chapters[0].chapter.id
             ChapterConceptLockService(session).lock_concept(
@@ -4952,13 +5011,13 @@ class PersistenceAndReviewTests(unittest.TestCase):
             )
             self.assertEqual(execution.rerun_scope_type, JobScopeType.PACKET.value)
             self.assertTrue(execution.issue_resolved)
-            final_review = ReviewService(ReviewRepository(session)).review_chapter(chapter_id)
             initial_term_issues = [
                 issue for issue in initial_review.issues if issue.issue_type == "TERM_CONFLICT"
             ]
             initial_style_issues = [
                 issue for issue in initial_review.issues if issue.issue_type == "STYLE_DRIFT"
             ]
+            final_review = ReviewService(ReviewRepository(session)).review_chapter(chapter_id)
             remaining_term_issues = [
                 issue for issue in final_review.issues if issue.issue_type == "TERM_CONFLICT"
             ]
@@ -4969,6 +5028,283 @@ class PersistenceAndReviewTests(unittest.TestCase):
             self.assertTrue(initial_style_issues)
             self.assertLess(len(remaining_term_issues), len(initial_term_issues))
             self.assertTrue(remaining_style_issues)
+
+    def test_bootstrap_repository_document_image_probe_preserves_uncommitted_concept_lock_state(self) -> None:
+        document_id = self._bootstrap_custom_epub_to_db(
+            [("Chapter One", "chapter1.xhtml", MIXED_AUTO_FOLLOWUP_XHTML)]
+        )
+
+        with self.session_factory() as session:
+            workflow = DocumentWorkflowService(
+                session,
+                translation_worker=GuidanceAwareMixedWorker(),
+            )
+            workflow.translate_document(document_id)
+            session.commit()
+            chapter_id = workflow.bootstrap_repository.load_document_bundle(document_id).chapters[0].chapter.id
+
+            lock_result = ChapterConceptLockService(session).lock_concept(
+                chapter_id=chapter_id,
+                source_term="agentic AI",
+                canonical_zh="智能体式AI",
+            )
+
+            self.assertTrue(workflow.bootstrap_repository._document_images_table_available())
+
+            review_bundle = ReviewRepository(session).load_chapter_bundle(chapter_id)
+            self.assertIsNotNone(review_bundle.chapter_translation_memory)
+            assert review_bundle.chapter_translation_memory is not None
+            self.assertEqual(review_bundle.chapter_translation_memory.version, lock_result.snapshot_version)
+            self.assertEqual(review_bundle.chapter_translation_memory.status.value, "active")
+            self.assertIn(
+                ("agentic AI", "智能体式AI"),
+                [
+                    (entry.source_term, entry.target_term)
+                    for entry in review_bundle.term_entries
+                    if entry.scope_id == chapter_id and entry.status == TermStatus.ACTIVE
+                ],
+            )
+
+    def test_export_repository_document_image_probe_preserves_uncommitted_concept_lock_state(self) -> None:
+        document_id = self._bootstrap_custom_epub_to_db(
+            [("Chapter One", "chapter1.xhtml", MIXED_AUTO_FOLLOWUP_XHTML)]
+        )
+
+        with tempfile.TemporaryDirectory() as outdir:
+            with self.session_factory() as session:
+                workflow = DocumentWorkflowService(
+                    session,
+                    export_root=outdir,
+                    translation_worker=GuidanceAwareMixedWorker(),
+                )
+                workflow.translate_document(document_id)
+                session.commit()
+                chapter_id = workflow.bootstrap_repository.load_document_bundle(document_id).chapters[0].chapter.id
+
+                lock_result = ChapterConceptLockService(session).lock_concept(
+                    chapter_id=chapter_id,
+                    source_term="agentic AI",
+                    canonical_zh="智能体式AI",
+                )
+
+                export_repository = ExportRepository(session)
+                self.assertTrue(export_repository._document_images_table_available())
+                export_repository.load_chapter_bundle(chapter_id)
+
+                review_bundle = ReviewRepository(session).load_chapter_bundle(chapter_id)
+                self.assertIsNotNone(review_bundle.chapter_translation_memory)
+                assert review_bundle.chapter_translation_memory is not None
+                self.assertEqual(review_bundle.chapter_translation_memory.version, lock_result.snapshot_version)
+                self.assertEqual(review_bundle.chapter_translation_memory.status.value, "active")
+                self.assertIn(
+                    ("agentic AI", "智能体式AI"),
+                    [
+                        (entry.source_term, entry.target_term)
+                        for entry in review_bundle.term_entries
+                        if entry.scope_id == chapter_id and entry.status == TermStatus.ACTIVE
+                    ],
+                )
+
+    def test_workflow_review_auto_followup_candidates_prioritize_mixed_packets_over_style_only_volume(self) -> None:
+        with self.session_factory() as session:
+            workflow = DocumentWorkflowService(session)
+            now = datetime.now(timezone.utc)
+            style_issue_packet_a_1 = ReviewIssue(
+                id="issue-style-a-1",
+                document_id="doc-1",
+                chapter_id="chapter-1",
+                block_id=None,
+                sentence_id="sent-a-1",
+                packet_id="packet-a",
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "style_rule": "context_engineering_literal",
+                    "preferred_hint": "上下文工程",
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            style_issue_packet_a_2 = ReviewIssue(
+                id="issue-style-a-2",
+                document_id="doc-1",
+                chapter_id="chapter-1",
+                block_id=None,
+                sentence_id="sent-a-2",
+                packet_id="packet-a",
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "style_rule": "context_engineering_literal",
+                    "preferred_hint": "上下文工程",
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            style_issue_packet_a_3 = ReviewIssue(
+                id="issue-style-a-3",
+                document_id="doc-1",
+                chapter_id="chapter-1",
+                block_id=None,
+                sentence_id="sent-a-3",
+                packet_id="packet-a",
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "style_rule": "context_engineering_literal",
+                    "preferred_hint": "上下文工程",
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            term_issue_packet_b = ReviewIssue(
+                id="issue-term-b",
+                document_id="doc-1",
+                chapter_id="chapter-1",
+                block_id=None,
+                sentence_id="sent-b-1",
+                packet_id="packet-b",
+                issue_type="TERM_CONFLICT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.HIGH,
+                blocking=True,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "source_term": "agentic AI",
+                    "actual_target_term": "代理型AI",
+                    "expected_target_term": "智能体式AI",
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            style_issue_packet_b = ReviewIssue(
+                id="issue-style-b",
+                document_id="doc-1",
+                chapter_id="chapter-1",
+                block_id=None,
+                sentence_id="sent-b-2",
+                packet_id="packet-b",
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "style_rule": "context_engineering_literal",
+                    "preferred_hint": "上下文工程",
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            artifacts = ReviewArtifacts(
+                issues=[
+                    style_issue_packet_a_1,
+                    style_issue_packet_a_2,
+                    style_issue_packet_a_3,
+                    term_issue_packet_b,
+                    style_issue_packet_b,
+                ],
+                actions=[
+                    IssueAction(
+                        id="action-style-a-1",
+                        issue_id="issue-style-a-1",
+                        action_type=ActionType.RERUN_PACKET,
+                        scope_type=JobScopeType.PACKET,
+                        scope_id="packet-a",
+                        status=ActionStatus.PLANNED,
+                        reason_json={},
+                        created_by=ActionActorType.SYSTEM,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    IssueAction(
+                        id="action-style-a-2",
+                        issue_id="issue-style-a-2",
+                        action_type=ActionType.RERUN_PACKET,
+                        scope_type=JobScopeType.PACKET,
+                        scope_id="packet-a",
+                        status=ActionStatus.PLANNED,
+                        reason_json={},
+                        created_by=ActionActorType.SYSTEM,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    IssueAction(
+                        id="action-style-a-3",
+                        issue_id="issue-style-a-3",
+                        action_type=ActionType.RERUN_PACKET,
+                        scope_type=JobScopeType.PACKET,
+                        scope_id="packet-a",
+                        status=ActionStatus.PLANNED,
+                        reason_json={},
+                        created_by=ActionActorType.SYSTEM,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    IssueAction(
+                        id="action-term-b",
+                        issue_id="issue-term-b",
+                        action_type=ActionType.UPDATE_TERMBASE_THEN_RERUN_TARGETED,
+                        scope_type=JobScopeType.PACKET,
+                        scope_id="packet-b",
+                        status=ActionStatus.PLANNED,
+                        reason_json={},
+                        created_by=ActionActorType.SYSTEM,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    IssueAction(
+                        id="action-style-b",
+                        issue_id="issue-style-b",
+                        action_type=ActionType.RERUN_PACKET,
+                        scope_type=JobScopeType.PACKET,
+                        scope_id="packet-b",
+                        status=ActionStatus.PLANNED,
+                        reason_json={},
+                        created_by=ActionActorType.SYSTEM,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ],
+                rerun_plans=[],
+                summary=ReviewChapterQualitySummary(
+                    coverage_ok=True,
+                    alignment_ok=True,
+                    term_ok=False,
+                    format_ok=True,
+                    blocking_issue_count=1,
+                    low_confidence_count=0,
+                    format_pollution_count=0,
+                ),
+                resolved_issue_ids=[],
+            )
+
+            candidates = workflow._review_auto_followup_candidate_actions(
+                artifacts,
+                issue_by_id={issue.id: issue for issue in artifacts.issues},
+                attempted_action_ids={"action-term-b"},
+            )
+
+            self.assertEqual([action.id for action in candidates], ["action-style-b", "action-style-a-1"])
 
     def test_workflow_review_auto_executes_single_packet_unlocked_concept_followups(self) -> None:
         document_id = self._bootstrap_custom_epub_to_db(

@@ -9,6 +9,7 @@ from book_agent.workers.contracts import (
     CompiledTranslationContext,
     ConceptCandidate,
     ContextPacket,
+    DiscourseBridge,
     PacketBlock,
     RelevantTerm,
     TranslatedContextBlock,
@@ -19,6 +20,7 @@ PROMOTED_PARAGRAPH_INTENTS = frozenset({"definition", "evidence"})
 MAX_CONTEXT_SOURCE_BLOCKS_PER_SIDE = 1
 MAX_CONTEXT_SOURCE_CHARS_PER_SIDE = 320
 MAX_CONTEXT_BRIEF_CHARS = 220
+MAX_SECTION_BRIEF_CHARS = 160
 SHORT_CONTEXT_CURRENT_CHARS = 220
 VERY_SHORT_CONTEXT_CURRENT_CHARS = 120
 CONTEXT_BRIDGE_PREFIXES = (
@@ -73,6 +75,16 @@ CONCEPT_STOPWORDS = frozenset(
     }
 )
 MAX_RELEVANT_CHAPTER_CONCEPTS = 4
+MAX_ACTIVE_REFERENTS = 3
+
+PARAGRAPH_ROLE_LABELS = {
+    "analogy": "analogy",
+    "definition": "concept definition",
+    "evidence": "evidence-based reasoning",
+    "exposition": "technical explanation",
+    "summary": "summary",
+    "transition": "transition",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +109,21 @@ def _coerce_nonnegative_int(value: object) -> int:
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _unique_nonempty_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
 
 
 def _packet_current_text(packet: ContextPacket) -> str:
@@ -524,20 +551,24 @@ def _merge_relevant_terms(
     return ordered
 
 
-def _infer_paragraph_intent(packet: ContextPacket, chapter_memory_snapshot: MemorySnapshot | None) -> dict[str, str]:
-    current_text = " ".join(block.text for block in packet.current_blocks if block.text).strip()
-    if not current_text:
-        return {}
-    lowered = current_text.casefold()
-    brief = ""
-    if chapter_memory_snapshot is not None:
-        brief = str(chapter_memory_snapshot.content_json.get("chapter_brief") or "").casefold()
-    if not brief:
-        brief = str(packet.chapter_brief or "").casefold()
+def _infer_paragraph_intent_from_text(text: str, *, brief: str = "") -> tuple[str, str]:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return "", ""
+    lowered = normalized.casefold()
+    lowered_brief = _normalize_text(brief).casefold()
 
     intent = "exposition"
     hint = "Treat this as explanatory technical prose and keep the Chinese paragraph connected, stable, and readable."
-    if any(marker in lowered for marker in ("refers to", "is what some are beginning to call", "in technical terms", "is the deliberate design")):
+    if any(
+        marker in lowered
+        for marker in (
+            "refers to",
+            "is what some are beginning to call",
+            "in technical terms",
+            "is the deliberate design",
+        )
+    ):
         intent = "definition"
         hint = "Treat this as concept-definition prose: choose concise, reusable terminology and make the definition read like publication-grade Chinese."
     elif any(marker in lowered for marker in ("recipe book", "personal chef", "chef", "pantry", "in other words", "likewise")):
@@ -552,9 +583,22 @@ def _infer_paragraph_intent(packet: ContextPacket, chapter_memory_snapshot: Memo
     elif any(marker in lowered for marker in ("in summary", "overall", "in short", "therefore")):
         intent = "summary"
         hint = "Treat this as a summarizing paragraph: tighten the Chinese so the takeaway lands cleanly."
-    elif "context engineering" in brief and "context engineering" in lowered:
+    elif "context engineering" in lowered_brief and "context engineering" in lowered:
         intent = "definition"
         hint = "Treat this as a chapter-defining concept paragraph: keep the core concept rendering concise, stable, and easy to reuse later."
+    return intent, hint
+
+
+def _infer_paragraph_intent(packet: ContextPacket, chapter_memory_snapshot: MemorySnapshot | None) -> dict[str, str]:
+    current_text = " ".join(block.text for block in packet.current_blocks if block.text).strip()
+    if not current_text:
+        return {}
+    brief = ""
+    if chapter_memory_snapshot is not None:
+        brief = str(chapter_memory_snapshot.content_json.get("chapter_brief") or "").casefold()
+    if not brief:
+        brief = str(packet.chapter_brief or "").casefold()
+    intent, hint = _infer_paragraph_intent_from_text(current_text, brief=brief)
 
     return {
         "paragraph_intent": intent,
@@ -586,9 +630,185 @@ def _source_aware_literalism_guardrails(packet: ContextPacket) -> dict[str, str]
     }
 
 
+def _paragraph_role_label(intent: str) -> str | None:
+    normalized = _normalize_text(intent).casefold()
+    if not normalized:
+        return None
+    return PARAGRAPH_ROLE_LABELS.get(normalized, normalized.replace("_", " "))
+
+
+def _active_referents(
+    *,
+    current_text: str,
+    relevant_terms: list[RelevantTerm],
+    concepts: list[ConceptCandidate],
+) -> list[str]:
+    locked_terms = [term.source_term for term in relevant_terms if term.lock_level == "locked"]
+    concept_terms = [concept.source_term for concept in concepts if concept.source_term]
+    candidates = _unique_nonempty_strings([*locked_terms, *concept_terms])
+    lowered_current = _normalize_text(current_text).casefold()
+
+    def _referent_key(value: str) -> tuple[int, int, int, str]:
+        position = lowered_current.find(value.casefold())
+        if position >= 0:
+            return (0, position, -len(value), value.casefold())
+        return (1, 10_000, -len(value), value.casefold())
+
+    ordered = sorted(candidates, key=_referent_key)
+    return ordered[:MAX_ACTIVE_REFERENTS]
+
+
+def _section_scope_label(packet: ContextPacket) -> str:
+    if packet.heading_path:
+        leaf = _normalize_text(packet.heading_path[-1])
+        if leaf:
+            return f"the section '{leaf}'"
+    return "the current section"
+
+
+def _section_anchor_referent(
+    *,
+    current_text: str,
+    relevant_terms: list[RelevantTerm],
+    concepts: list[ConceptCandidate],
+) -> str | None:
+    active_referents = _active_referents(
+        current_text=current_text,
+        relevant_terms=relevant_terms,
+        concepts=concepts,
+    )
+    if not active_referents:
+        return None
+    return active_referents[0]
+
+
+def _build_section_brief(
+    packet: ContextPacket,
+    *,
+    chapter_memory_snapshot: MemorySnapshot | None,
+    relevant_terms: list[RelevantTerm],
+    concepts: list[ConceptCandidate],
+) -> str | None:
+    current_text = " ".join(block.text for block in packet.current_blocks if block.text).strip()
+    if not current_text:
+        return None
+    brief = ""
+    if chapter_memory_snapshot is not None:
+        brief = str(chapter_memory_snapshot.content_json.get("chapter_brief") or "")
+    if not brief:
+        brief = str(packet.chapter_brief or "")
+    intent, _hint = _infer_paragraph_intent_from_text(current_text, brief=brief)
+    scope_label = _section_scope_label(packet)
+    referent = _section_anchor_referent(
+        current_text=current_text,
+        relevant_terms=relevant_terms,
+        concepts=concepts,
+    )
+
+    if intent == "definition" and referent:
+        text = f"This part of {scope_label} defines {referent} and clarifies how it should be understood in the chapter."
+    elif intent == "evidence" and referent:
+        text = f"This part of {scope_label} presents evidence and implications for {referent}."
+    elif intent == "analogy" and referent:
+        text = f"This part of {scope_label} uses analogy to make {referent} concrete before returning to the technical point."
+    elif intent == "transition" and referent:
+        text = f"This part of {scope_label} shifts the discussion toward {referent} and sets up the next technical point."
+    elif intent == "summary" and referent:
+        text = f"This part of {scope_label} consolidates the takeaway about {referent}."
+    elif referent:
+        text = f"This part of {scope_label} continues the technical explanation about {referent}."
+    elif intent == "transition":
+        text = f"This part of {scope_label} acts as a local transition and sets up the next technical point."
+    elif intent == "summary":
+        text = f"This part of {scope_label} consolidates the local takeaway."
+    else:
+        text = f"This part of {scope_label} continues the chapter's technical explanation."
+
+    return _compress_chapter_brief(text)[:MAX_SECTION_BRIEF_CHARS].rstrip()
+
+
+def _previous_source_excerpt(packet: ContextPacket) -> str:
+    if packet.prev_blocks:
+        return _normalize_text(packet.prev_blocks[-1].text)
+    if packet.prev_translated_blocks:
+        return _normalize_text(packet.prev_translated_blocks[-1].source_excerpt)
+    return ""
+
+
+def _relation_to_previous(
+    *,
+    previous_role: str | None,
+    current_role: str | None,
+    current_text: str,
+) -> str | None:
+    if not current_role:
+        return None
+    if not previous_role:
+        if _starts_with_context_bridge(current_text):
+            return f"opens with an explicit bridge and then moves into {current_role}"
+        return f"opens a new local point as {current_role}"
+    if previous_role == current_role:
+        if current_role == "technical explanation":
+            return "continues the same technical explanation"
+        return f"continues the same {current_role}"
+
+    special_cases = {
+        ("analogy", "concept definition"): "moves from analogy into concept definition",
+        ("concept definition", "evidence-based reasoning"): "moves from concept definition into evidence and implications",
+        ("technical explanation", "evidence-based reasoning"): "moves from explanation into evidence and justification",
+        ("technical explanation", "transition"): "shifts from explanation into a local transition",
+        ("transition", "concept definition"): "uses a transition to enter a new concept definition",
+    }
+    if (previous_role, current_role) in special_cases:
+        return special_cases[(previous_role, current_role)]
+    if _starts_with_context_bridge(current_text):
+        return f"uses an explicit bridge to move from {previous_role} into {current_role}"
+    return f"moves from {previous_role} into {current_role}"
+
+
+def _build_discourse_bridge(
+    packet: ContextPacket,
+    *,
+    chapter_memory_snapshot: MemorySnapshot | None,
+    relevant_terms: list[RelevantTerm],
+    concepts: list[ConceptCandidate],
+) -> DiscourseBridge | None:
+    current_text = " ".join(block.text for block in packet.current_blocks if block.text).strip()
+    if not current_text:
+        return None
+    brief = ""
+    if chapter_memory_snapshot is not None:
+        brief = str(chapter_memory_snapshot.content_json.get("chapter_brief") or "")
+    if not brief:
+        brief = str(packet.chapter_brief or "")
+    current_intent, _current_hint = _infer_paragraph_intent_from_text(current_text, brief=brief)
+    previous_text = _previous_source_excerpt(packet)
+    previous_intent, _previous_hint = _infer_paragraph_intent_from_text(previous_text, brief=brief) if previous_text else ("", "")
+    current_role = _paragraph_role_label(current_intent)
+    previous_role = _paragraph_role_label(previous_intent)
+    relation = _relation_to_previous(
+        previous_role=previous_role,
+        current_role=current_role,
+        current_text=current_text,
+    )
+    active_referents = _active_referents(
+        current_text=current_text,
+        relevant_terms=relevant_terms,
+        concepts=concepts,
+    )
+    if not any([previous_role, current_role, relation, active_referents]):
+        return None
+    return DiscourseBridge(
+        previous_paragraph_role=previous_role,
+        current_paragraph_role=current_role,
+        relation_to_previous=relation,
+        active_referents=active_referents,
+    )
+
+
 @dataclass(slots=True)
 class ChapterContextCompiler:
-    compile_version: str = "v3.prev-translated-primary.context-trim.intent-precision.style-drift-sync"
+    compile_version: str = "v4.section-brief-discourse-bridge"
 
     def compile(
         self,
@@ -653,9 +873,23 @@ class ChapterContextCompiler:
             merged_style_constraints.update(_promoted_paragraph_intent(packet, chapter_memory_snapshot))
         if compile_options.include_literalism_guardrails:
             merged_style_constraints.update(_source_aware_literalism_guardrails(packet))
+        section_brief = _build_section_brief(
+            packet,
+            chapter_memory_snapshot=chapter_memory_snapshot,
+            relevant_terms=merged_terms,
+            concepts=merged_concepts,
+        )
+        discourse_bridge = _build_discourse_bridge(
+            packet,
+            chapter_memory_snapshot=chapter_memory_snapshot,
+            relevant_terms=merged_terms,
+            concepts=merged_concepts,
+        )
         merged_packet = compiled_packet.model_copy(
             update={
                 "chapter_brief": compiled_brief,
+                "section_brief": section_brief,
+                "discourse_bridge": discourse_bridge,
                 "chapter_concepts": merged_concepts,
                 "relevant_terms": merged_terms,
                 "prev_translated_blocks": sanitized_previous,
@@ -670,5 +904,7 @@ class ChapterContextCompiler:
                 "chapter_memory_available": chapter_memory_snapshot is not None,
                 "trimmed_prev_block_count": len(trimmed_prev_blocks),
                 "trimmed_next_block_count": len(trimmed_next_blocks),
+                "section_brief_present": bool(section_brief),
+                "discourse_bridge_present": discourse_bridge is not None,
             },
         )

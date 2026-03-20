@@ -42,11 +42,21 @@ def style_hints_for_issue(issue: ReviewIssue) -> tuple[str, ...]:
     evidence = issue.evidence_json or {}
     preferred_hint = str(evidence.get("preferred_hint") or "").strip()
     style_rule = str(evidence.get("style_rule") or "").strip()
-    if issue.issue_type != "STYLE_DRIFT" or not preferred_hint:
+    prompt_guidance = str(evidence.get("prompt_guidance") or "").strip()
+    if issue.issue_type != "STYLE_DRIFT":
         return ()
-    if style_rule:
-        return (f"Rerun focus [{style_rule}]: prefer '{preferred_hint}' over literal phrasing in this packet.",)
-    return (f"Rerun focus: prefer '{preferred_hint}' over literal phrasing in this packet.",)
+    hints: list[str] = []
+    if preferred_hint:
+        if style_rule:
+            hints.append(f"Rerun focus [{style_rule}]: prefer '{preferred_hint}' over literal phrasing in this packet.")
+        else:
+            hints.append(f"Rerun focus: prefer '{preferred_hint}' over literal phrasing in this packet.")
+    if prompt_guidance:
+        if style_rule:
+            hints.append(f"Rerun guidance [{style_rule}]: {prompt_guidance}")
+        else:
+            hints.append(f"Rerun guidance: {prompt_guidance}")
+    return tuple(hints)
 
 
 def packet_scope_ids_for_issue(issue: ReviewIssue) -> list[str]:

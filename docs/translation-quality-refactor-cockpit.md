@@ -1,6 +1,6 @@
 # Translation Quality Refactor Cockpit
 
-Last Updated: 2026-03-19
+Last Updated: 2026-03-20
 Status: active
 Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Scale and AI-Native Application Design`
 
@@ -318,14 +318,174 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 - [x] 已给正式 `role-style-v2` prompt 接入高置信 `Paragraph Intent Signal`：当前只把 `definition / evidence` 这类高精度意图显式注入 prompt，类比段默认不再放大
 - [x] 已给 `role-style-v2` 接入 source-aware literalism guardrails（可开关）：当源文命中 `context engineering / weight of evidence / contextually accurate outputs` 这类高风险 literalism 锚点时，会把更自然的中文改写方向显式编译进 prompt
 - [x] 已将 `STYLE_DRIFT` 检测规则与 source-aware literalism guardrails 收拢成共享定义：后续扩规则时，首轮 prompt 与 review 检测不再各自漂移
+- [x] 已给 runtime compiled context 接入 `section_brief + discourse_bridge`，并让 `role-style-v2 / material-aware` prompt 正式消费 `Section-Level Scaffolding`
+- [x] `packet_experiment` 已显式暴露 `compiled_section_brief_present / compiled_discourse_bridge_present`
+- [x] `STYLE_DRIFT` issue evidence 已开始携带 `prompt_guidance`，rerun plan 不再只注入一句 `preferred_hint`
+- [x] 已新增 `profound sense of responsibility` 的共享 literalism 规则，首轮 prompt guardrail、review 检测与 rerun hint 现共用同一份定义
+- [x] 实验工位已支持 `review_issue_id -> rerun hints / concept overrides` 自动还原，不再手工抄 hint
+- [x] 已在真实 packet `2e26e803-5d84-52ae-9b01-c5b8e07a7d93` 上完成 `current-default-v4` vs `review-issues-v4` 的 dry-run / execute 对照
+- [x] 已在第二个真实 packet `b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6` 上完成 `current-default-v4` vs `review-issues-v4` 的 dry-run / execute 对照
+- [x] chapter smoke 默认已按 selective rollout 重排：优先 mixed / non-style packet，而不是盲目沿用 memory-first scan 顺序
+- [x] workflow auto-followup 预算也已接入 selective rollout：保持 `TERM_CONFLICT / UNLOCKED_KEY_CONCEPT / STYLE_DRIFT` 顺序不变，但在同 issue type 内优先 mixed / non-style packet
+- [x] 已修复 `UNLOCKED_KEY_CONCEPT` auto-lock 的 snapshot 稳定性：bootstrap/export repository 的 document-image table probe 都不再绕开当前事务连接
+- [x] 已在真实章节副本上完成 same-session `review auto-followup + review package + bilingual_html + merged_markdown` execute，确认最新 workflow/export 修复在 live chapter 上可交付
 
 ### Planned
 
 - [ ] 继续扩展 review 规则，把 `STYLE_DRIFT` 从当前词组级模式推进到更泛化的直译腔检测
+- [ ] 沿“共享定义 -> review evidence -> rerun guidance”继续扩高信号窄规则，下一批优先 `real problem / darkly humorous reminder`
 - [ ] 基于这次 `denoised execute` 结果，决定是否继续收紧 `concept registry` 候选策略，尤其是 `智能体AI` 这类仍需人工裁决的术语
 - [ ] 基于 `context engineering` 实验结果，决定是否把“临时 override -> 锁定写回”升成正式术语裁决流程
 - [ ] 决定是否把 `agentic AI -> 智能体式AI` 正式提升为当前章节默认裁决，并作为后续 packet 的首选基线
 - [ ] 再决定下一刀是继续强化 concept policy，还是扩大 `STYLE_DRIFT` 规则面
+
+## 15. 2026-03-20 Stabilize `UNLOCKED_KEY_CONCEPT` Auto-Lock Snapshot Semantics
+
+这轮解决的不是 prompt 质量，而是 workflow / bootstrap 层一个很隐蔽的事务一致性问题：
+
+- mixed workflow 样本里，手工 `lock_concept()` 后再进 `review_document()`
+- `UNLOCKED_KEY_CONCEPT` 的 auto-lock 会在第二次 supersede chapter translation memory 时撞 `memory_snapshots` 的 `StaleDataError`
+- 乍看像是 `ChapterConceptLockService` 的 flush 冲突，但真正根因在 [bootstrap.py](/Users/smy/project/book-agent/src/book_agent/infra/repositories/bootstrap.py)
+
+根因：
+
+- `_document_images_table_available()` 之前用的是 engine 级 `inspect(bind).has_table(...)`
+- 在未提交事务里，这个 schema probe 会绕开当前 session connection
+- 对 `chapter_translation_memory + term_entries` 这类刚写入但尚未提交的状态，probe 后再读 bundle，就可能看到旧视图
+- 结果就是：
+  - `ReviewRepository.load_chapter_bundle()` 会重新看到旧的 chapter memory snapshot
+  - `UNLOCKED_KEY_CONCEPT` / `TERM_CONFLICT` 判断发生漂移
+  - 下一次 auto-lock 再 supersede 时，直接撞 `StaleDataError`
+
+修复：
+
+- [bootstrap.py](/Users/smy/project/book-agent/src/book_agent/infra/repositories/bootstrap.py)
+  - `_document_images_table_available()` 改为 inspect 当前 `session.connection()`
+  - schema probe 与 bundle/review/lock/rerun 现在共享同一事务视图
+- [export.py](/Users/smy/project/book-agent/src/book_agent/infra/repositories/export.py)
+  - 同样把 `_document_images_table_available()` 改为 inspect 当前 `session.connection()`
+  - export bundle 加载不再有机会冲掉同 session 中未提交的 chapter memory / term lock 视图
+- [session.py](/Users/smy/project/book-agent/src/book_agent/infra/db/session.py)
+  - `sqlite:///:memory:` 现在显式使用 `StaticPool`
+  - 测试环境里不再放大 connection-level 漂移
+
+新增回归：
+
+- [test_bootstrap_repository_document_image_probe_preserves_uncommitted_concept_lock_state](/Users/smy/project/book-agent/tests/test_persistence_and_review.py)
+  - 直接锁住这次根因：document-image table probe 之后，未提交的 concept lock snapshot / term entry 仍然必须保持可见
+- [test_export_repository_document_image_probe_preserves_uncommitted_concept_lock_state](/Users/smy/project/book-agent/tests/test_persistence_and_review.py)
+  - export bundle 在做 document-image table probe 后，也必须继续看到同一事务里的 concept lock 结果
+- [test_workflow_review_auto_followups_prioritize_packet_term_conflicts_before_style_drift](/Users/smy/project/book-agent/tests/test_persistence_and_review.py)
+  - 已恢复成端到端 mixed workflow 验证，不再只是 candidate 排序断言
+
+验证：
+
+- `uv run pytest tests/test_persistence_and_review.py -q -k "test_workflow_review_auto_executes_single_packet_unlocked_concept_followups or test_workflow_review_auto_executes_multi_packet_unlocked_concept_followups_without_chapter_rerun or test_workflow_review_does_not_run_stale_brief_followup_when_concept_autolock_succeeds or test_workflow_review_auto_followups_prioritize_packet_term_conflicts_before_style_drift"`
+  - `4 passed`
+- `uv run pytest tests/test_persistence_and_review.py -q -k "document_image_probe_preserves_uncommitted_concept_lock_state or review_auto_followup"`
+  - `4 passed`
+- `uv run pytest tests/test_persistence_and_review.py -q -k "review_auto_followup or final_export_auto_followup_can_rebuild_packet_context_failure or workflow_exports_merged_markdown or document_image_probe_preserves_uncommitted_concept_lock_state"`
+  - `6 passed, 2 failed`
+  - 两条失败都集中在 `MERGED_MARKDOWN` 标题断言：
+    - 期望 `Chapter One`
+    - 实际 `ZH::Chapter One`
+  - 这更像导出内容期望与当前标题翻译行为不一致，不像 engine/session probe 问题
+- `uv run ruff check src/book_agent/infra/db/session.py src/book_agent/infra/repositories/bootstrap.py src/book_agent/infra/repositories/export.py tests/test_persistence_and_review.py`
+  - `All checks passed`
+- 全仓事务探测检索：
+  - workflow/export 事务内的 `has_table` 现在只剩 bootstrap/export 两处，且都已切到 `session.connection()`
+  - 剩余 `session.get_bind()` 只在 API history backfill 路由中提取 database URL，不参与事务内读写
+
+这轮收敛出的经验很重要：
+
+- 这不是 `UNLOCKED_KEY_CONCEPT` 检测规则本身不稳
+- 也不是 auto-lock prompt / resolver 不稳
+- 而是 bootstrap 层一个看似无害的 capability probe，破坏了 workflow 在同一事务中的可见性边界
+
+所以后续如果再做 workflow / export / chapter smoke 的稳定性修复，优先要检查：
+
+- 有没有 engine 级 schema/data probe 绕开 session connection
+- 有没有在未提交事务中读取“看起来是最新、实际却是旧连接视图”的 bundle
+
+## 16. 2026-03-20 Real Chapter Followup Smoke on Cloned DB
+
+为了确认这轮修复不只是在测试里成立，我补了一条真实章节工位：
+
+- 新增 runner：[run_real_chapter_followup_smoke.py](/Users/smy/project/book-agent/scripts/run_real_chapter_followup_smoke.py)
+- 运行方式：先复制当前 live DB，再在副本上用同一 session 依次执行
+  - `review_document(..., auto_execute_packet_followups=True)`
+  - `export_chapter(..., review_package)`
+  - `export_chapter(..., bilingual_html)`
+  - `export_document_merged_markdown(...)`
+
+真实样本：
+
+- document: `1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4`
+- chapter: `d1ff075e-e6cf-52ee-9eb7-789d2b6a4a9c`
+- 副本工位：
+  - [chapter-followup.report.json](/Users/smy/project/book-agent/artifacts/real-book-live/agentic-ai-data-architectures-v2-ch5-followup-smoke/chapter-followup.report.json)
+  - [review package](/Users/smy/project/book-agent/artifacts/real-book-live/agentic-ai-data-architectures-v2-ch5-followup-smoke/exports/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/review-package-d1ff075e-e6cf-52ee-9eb7-789d2b6a4a9c.json)
+  - [bilingual html](/Users/smy/project/book-agent/artifacts/real-book-live/agentic-ai-data-architectures-v2-ch5-followup-smoke/exports/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/bilingual-d1ff075e-e6cf-52ee-9eb7-789d2b6a4a9c.html)
+  - [merged markdown](/Users/smy/project/book-agent/artifacts/real-book-live/agentic-ai-data-architectures-v2-ch5-followup-smoke/exports/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/merged-document.md)
+
+before / after：
+
+- 执行前 open issues：`12`
+  - `TERM_CONFLICT=1`
+  - `STYLE_DRIFT=6`
+  - `UNLOCKED_KEY_CONCEPT=4`
+  - `STALE_CHAPTER_BRIEF=1`
+- 实际 auto-followup 执行了 `2` 次
+  - `TERM_CONFLICT -> UPDATE_TERMBASE_THEN_RERUN_TARGETED`
+    - packet: `2e26e803-5d84-52ae-9b01-c5b8e07a7d93`
+    - rerun translation run: `f391597b-c050-5dc4-8cfd-71e28e2b00b7`
+  - `STYLE_DRIFT -> RERUN_PACKET`
+    - packet: `b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6`
+    - rerun translation run: `cce42606-915d-573b-8ee8-5ea407f26604`
+- 执行后 open issues：`5`
+  - `UNLOCKED_KEY_CONCEPT=4`
+  - `STALE_CHAPTER_BRIEF=1`
+- 章节质量摘要：
+  - `blocking_issue_count=0`
+  - `coverage_ok=true`
+  - `alignment_ok=true`
+  - `term_ok=true`
+  - `format_ok=true`
+  - chapter status=`qa_checked`
+
+真实 rerun 译文收益：
+
+- `2e26...` 重跑后已经稳定落成：
+  - `上下文工程`
+  - `现有证据表明`
+  - `更符合上下文的输出`
+- `b4c1...` 的 style rerun 也收敛到更自然的“外部上下文塑造推理过程并指导行为”，对应 `STYLE_DRIFT` 已清零
+
+真实成本：
+
+- `2e26...`
+  - `token_in=2415`
+  - `token_out=365`
+  - `cost_usd=0.000233`
+  - `latency_ms=12268`
+- `b4c1...`
+  - `token_in=2308`
+  - `token_out=262`
+  - `cost_usd=0.000547`
+  - `latency_ms=8958`
+- 本轮 live followup 总成本约 `0.000780 USD`
+
+结论：
+
+- 这轮最新改动已经在真实章节上产生了明确的交付收益，而不是只体现在测试里
+- workflow auto-followup 能稳定清掉当前最重要的 packet-scope `TERM_CONFLICT + STYLE_DRIFT`
+- same-session export 也已真实跑通，说明 bootstrap/export session-connection 修复没有阻塞 live chapter 导出
+
+残余缺口：
+
+- 剩余 `UNLOCKED_KEY_CONCEPT` 之所以没有自动跟进，不是 session 稳定性问题，而是这些真实 issue 目前仍是 `packet_ids_seen=[]`
+- `STALE_CHAPTER_BRIEF` 也因此没有触发 packet-scope fallback
+- 下一刀更值得做的是：把真实章节里的 `UNLOCKED_KEY_CONCEPT` evidence 补齐 packet 归属，让 auto-followup 能覆盖这批 residual issues
 
 ## 8. Validation Protocol
 
@@ -1491,3 +1651,270 @@ Scope: `Agentic AI Data Architectures How Distributed SQL Unifies Enterprise Sca
 
 - 影响最终阅读体验的很多“翻译质量问题”，根因其实不是 prompt，而是上游结构识别错误
 - 一旦把 prose mistaken as artifact 清掉，merged 质量会明显提升，而且不需要扩大 prompt 成本
+
+## 11. 2026-03-20 Real Packet Issue-Driven Rerun Workbench
+
+这轮在工程上补了一条非常关键的验收链路：
+
+- [packet_experiment.py](/Users/smy/project/book-agent/src/book_agent/services/packet_experiment.py)
+- [run_packet_experiment.py](/Users/smy/project/book-agent/scripts/run_packet_experiment.py)
+
+现在实验工位不再只接受手工 `rerun_hints`，而是可以直接吃 `review_issue_id`：
+
+- 自动解析 `STYLE_DRIFT -> style_hints`
+- 自动解析 `TERM_CONFLICT -> concept_overrides`
+- 将解析结果落到工件里的 `rerun_context`
+
+对应回归：
+
+- [test_translation_worker_abstraction.py](/Users/smy/project/book-agent/tests/test_translation_worker_abstraction.py)
+  - 新增 `test_packet_experiment_service_can_resolve_review_issue_ids_into_rerun_context`
+
+真实 packet 验收对象：
+
+- packet：`2e26e803-5d84-52ae-9b01-c5b8e07a7d93`
+- 章节：`d1ff075e-e6cf-52ee-9eb7-789d2b6a4a9c`
+- 本轮先重跑 review，再取该 packet 当前 open issues：
+  - `91ee4712-ccb4-5331-b49b-ee0b845941d2` `STYLE_DRIFT context_engineering_literal`
+  - `2a181017-aac1-5521-b193-5240658c2141` `STYLE_DRIFT durable_substrate_literal`
+  - `d77b12d0-ffe0-51ac-a8c7-2913d6f0ab26` `STYLE_DRIFT weight_of_evidence_literal`
+  - `7fff704f-e2c7-5353-bc6c-66e24f06bcb5` `STYLE_DRIFT contextually_accurate_outputs_literal`
+  - `ea048c63-5d3f-5740-a3ec-0a122ed6a34d` `TERM_CONFLICT`
+
+新工件：
+
+- dry-run baseline：[current-default-v4.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.current-default-v4.dryrun.json)
+- dry-run candidate：[review-issues-v4.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.review-issues-v4.dryrun.json)
+- dry-run diff：[review-issues-v4.diff.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.review-issues-v4.diff.json)
+- execute baseline：[current-default-v4.execute.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.current-default-v4.execute.json)
+- execute candidate：[review-issues-v4.execute.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.review-issues-v4.execute.json)
+- execute diff：[review-issues-v4.execute.diff.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/2e26e803-5d84-52ae-9b01-c5b8e07a7d93.role-style-v2.review-issues-v4.execute.diff.json)
+
+dry-run 结论：
+
+- baseline `total_prompt_chars = 6020`
+- candidate `total_prompt_chars = 7237`
+- candidate 已成功还原：
+  - `review_issue_count = 5`
+  - `resolved_rerun_hints = 8`
+  - `resolved_concept_overrides = 1`
+- `Section-Level Scaffolding` 在 baseline / candidate 中都存在
+- 但只有 candidate 真正带上了 `Rerun guidance [...]`
+
+execute 结论：
+
+- baseline：`token_in=2098`，`token_out=364`，`cost_usd=0.00056291`
+- candidate：`token_in=2415`，`token_out=451`，`cost_usd=0.00080111`
+- 两个版本这次都没有命中当前 `STYLE_DRIFT_RULES`
+- candidate 的直接变化不是“修掉了新坏味道”，而是更接近真实 rerun prompt 形态，并把段落重新拉开：
+  - `它指的是` -> `即对上下文如何被创建...`
+  - `在此视角下` -> `在这一视角下`
+  - `已述内容` -> `已陈述内容`
+  - 同时把后两句拆成独立行，段落节奏更清楚
+
+当前判断：
+
+- 这条 `review_issue_id -> experiment prompt` 链路值得保留，后续真实 rerun 验收不必再手工拼 hints
+- `review-issues-v4` 在这个 packet 上的主要价值，是让实验工位终于和真实 rerun 闭环对齐
+- 下一刀最值得做的，不是再堆更多人工 hints，而是继续挑 1-2 个高价值 packet，验证这种 issue-driven rerun 在真实书/论文样本上的收益是否稳定
+
+## 12. 2026-03-20 Second Real Packet Gate For MDU-4.1.3
+
+为了完成 `MDU-4.1.3`，这轮又补了第二个真实 packet：
+
+- packet：`b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6`
+- 当前 live issues：2 条 `STYLE_DRIFT`
+  - `0337b39e-959b-5ae8-970f-c6b74a8d52d0`
+  - `ffd69f40-7df3-5296-88a8-2f9eda1790a4`
+- 两条 issue 都指向同一规则：
+  - `in_context_information_literal`
+  - preferred hint：`上下文信息 / 外部上下文`
+
+对应工件：
+
+- dry-run baseline：[b4c1...current-default-v4.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.current-default-v4.dryrun.json)
+- dry-run candidate：[b4c1...review-issues-v4.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.review-issues-v4.dryrun.json)
+- dry-run diff：[b4c1...review-issues-v4.diff.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.review-issues-v4.diff.json)
+- execute baseline：[b4c1...current-default-v4.execute.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.current-default-v4.execute.json)
+- execute candidate：[b4c1...review-issues-v4.execute.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.review-issues-v4.execute.json)
+- execute diff：[b4c1...review-issues-v4.execute.diff.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/b4c1fdf2-1c43-5c0d-a068-dbd1ab843aa6.role-style-v2.review-issues-v4.execute.diff.json)
+
+dry-run 观察：
+
+- baseline `total_prompt_chars = 5860`
+- candidate `total_prompt_chars = 6200`
+- candidate 只多出 2 条去重后的 rerun hints：
+  - `Rerun focus [in_context_information_literal] ...`
+  - `Rerun guidance [in_context_information_literal] ...`
+
+execute 观察：
+
+- baseline：`token_in=2028`，`token_out=374`，`cost_usd=0.00066041`
+- candidate：`token_in=2113`，`token_out=364`，`cost_usd=0.00068001`
+- 两个版本都没有命中当前 `STYLE_DRIFT_RULES`
+- candidate 只是做了轻微重写：
+  - `处理方式存在差异` -> `处理方式 ... 不同`
+  - `揭示了在推理时提供外部上下文所蕴含的强大能力` -> `揭示了在推理时提供外部上下文的力量`
+
+这轮给出的 rollout 结论非常关键：
+
+- `2e26...`
+  - mixed issue packet
+  - issue-driven rerun workbench 很值得继续扩
+- `b4c1...`
+  - 轻量 style-only packet
+  - 当前默认链路已经能在真实 execute 中自愈，不需要 blanket 放大 issue-driven rerun
+
+因此 `MDU-4.1.3` 的最终收敛不是“继续无限扩样”，而是：
+
+- 继续保留 issue-driven rerun workbench
+- 但只对 mixed issue / high-value / 默认输出仍不稳的 packet 扩样
+- 不对轻量 style-only packet 做 blanket rerun 推广
+
+## 13. 2026-03-20 Selective Rollout Lands In Chapter Smoke
+
+在前两轮真实 packet 证据基础上，这一轮把策略真正下沉到了 chapter smoke：
+
+- [packet_experiment_scan.py](/Users/smy/project/book-agent/src/book_agent/services/packet_experiment_scan.py)
+  - 现在会为每个 packet 暴露 unresolved issue 摘要：
+    - `unresolved_issue_count`
+    - `unresolved_issue_types`
+    - `style_drift_issue_count`
+    - `non_style_issue_count`
+    - `has_non_style_issue`
+    - `mixed_issue_types`
+    - `issue_priority_tier`
+    - `issue_priority_reason`
+- [translation_chapter_smoke.py](/Users/smy/project/book-agent/src/book_agent/services/translation_chapter_smoke.py)
+  - `TranslationChapterSmokeOptions` 新增 `prefer_issue_driven_packets=True`
+  - 默认选样会优先：
+    1. mixed / non-style unresolved issue packet
+    2. unresolved issue count 更高的 packet
+    3. 再回落到 `memory_signal_score`
+- [run_translation_chapter_smoke.py](/Users/smy/project/book-agent/scripts/run_translation_chapter_smoke.py)
+  - 新增 `--disable-issue-priority`，便于和旧 memory-first 选样做 A/B
+
+回归：
+
+- `uv run pytest tests/test_translation_worker_abstraction.py -q -k "packet_experiment_scan_service or translation_chapter_smoke"`
+  - `4 passed`
+- `uv run ruff check src/book_agent/services/packet_experiment_scan.py src/book_agent/services/translation_chapter_smoke.py scripts/run_translation_chapter_smoke.py tests/test_translation_worker_abstraction.py`
+  - `All checks passed`
+
+真实章节级 dry-run 证据：
+
+- issue-priority 工件：[chapter-smoke.issue-priority.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/chapter-smoke.issue-priority.dryrun.json)
+- memory-first 工件：[chapter-smoke.memory-first.dryrun.json](/Users/smy/project/book-agent/artifacts/analysis/packet-experiments/1d8ba1ca-de9e-5014-b00e-77b6c3dbb3e4/chapter-smoke.memory-first.dryrun.json)
+
+同一章节 `d1ff...`、`selected_packet_limit=1` 的结果：
+
+- 默认 issue-priority：
+  - `selected_packet_ids = ['2e26e803-5d84-52ae-9b01-c5b8e07a7d93']`
+  - 这是当前 mixed issue / non-style packet
+- 关闭 issue-priority：
+  - `selected_packet_ids = ['21bc18c4-21d3-53e0-bc32-aa53a5b77cc5']`
+  - 这回到了原先的 memory-first top candidate
+
+这说明策略已经真正落地，而不是只停留在口头判断：
+
+- scan 仍保留 memory-first top candidate，方便分析 memory/context 收益
+- smoke 默认会把预算优先花在更值得做 issue-driven execute 的 packet 上
+- operator 若想看旧路径，也仍可显式关闭 issue priority
+
+## 14. 2026-03-20 Issue-Priority Budgeting Lands In Workflow Auto-Followup
+
+这一轮把 selective rollout 从 chapter smoke 再往下推进了一层，正式落到 workflow review auto-followup 的预算分配里：
+
+- [workflows.py](/Users/smy/project/book-agent/src/book_agent/services/workflows.py)
+  - `_review_auto_followup_candidate_actions()` 现在会额外统计：
+    - `packet_non_style_issue_counts`
+    - `packet_issue_types`
+  - 候选排序保持原有高层语义：
+    1. `blocking`
+    2. `issue type`：`TERM_CONFLICT -> UNLOCKED_KEY_CONCEPT -> STYLE_DRIFT`
+    3. `packet priority tier`：mixed / non-style packet 先于 style-only packet
+    4. `non-style issue weight`
+    5. `total issue weight`
+  - 这样做的效果是：
+    - 不会让 packet signal 反过来压过 `TERM_CONFLICT`
+    - 但同样是 `STYLE_DRIFT` 候选时，mixed/high-value packet 会先拿到 auto-followup 预算
+
+回归：
+
+- [test_workflow_review_auto_followup_candidates_prioritize_mixed_packets_over_style_only_volume](/Users/smy/project/book-agent/tests/test_persistence_and_review.py)
+  - 直接锁住“style-only packet 的 issue 更多，但 mixed packet 仍应先拿预算”的排序边界
+- [test_workflow_review_auto_followups_prioritize_packet_term_conflicts_before_style_drift](/Users/smy/project/book-agent/tests/test_persistence_and_review.py)
+  - 用真实 mixed review 工件确认：`TERM_CONFLICT` 候选仍排在 `STYLE_DRIFT` 前面
+
+验证：
+
+- `uv run pytest tests/test_persistence_and_review.py -q -k "review_auto_followup"`
+  - `3 passed`
+- `uv run ruff check src/book_agent/services/workflows.py tests/test_persistence_and_review.py`
+  - `All checks passed`
+
+这轮把 workflow 预算策略和 chapter smoke 策略对齐到了同一条主线：
+
+- smoke 负责把 mixed/high-value packet 更早拉进验收
+- workflow 负责在有限 auto-followup 预算里，别让 style-only 大包抢走本该留给 mixed packet 的机会
+
+剩余风险：
+
+- 这轮只锁定了 workflow candidate 排序本身
+- `UNLOCKED_KEY_CONCEPT -> auto-lock` 在混合真实样本上的 `memory_snapshots` flush 稳定性还值得单独开一刀，不应该在这轮排序改造里顺手混修
+
+## 10. 2026-03-20 Runtime Section Scaffolding + Narrow Style Guidance
+
+这一轮没有去替换默认 prompt profile，而是沿当前生产基线继续做两件更“生产化”的事：
+
+1. 把 section / discourse 连续性下沉进 runtime compile
+2. 把 `STYLE_DRIFT` 的窄规则真正贯通到 rerun guidance
+
+代码改动：
+
+- [context_compile.py](/Users/smy/project/book-agent/src/book_agent/services/context_compile.py)
+  - 新增 runtime-only `section_brief + discourse_bridge`
+  - `compile_version` 升到 `v4.section-brief-discourse-bridge`
+- [translator.py](/Users/smy/project/book-agent/src/book_agent/workers/translator.py)
+  - 正式加入 `Section-Level Scaffolding`
+  - 当前会向 `role-style-v2 / material-aware` prompt 注入：
+    - `Section Brief`
+    - `Previous Paragraph Role`
+    - `Current Paragraph Role`
+    - `Relation to Previous`
+    - `Active Referents`
+- [packet_experiment.py](/Users/smy/project/book-agent/src/book_agent/services/packet_experiment.py)
+  - 新增 `compiled_section_brief_present / compiled_discourse_bridge_present`
+- [style_drift.py](/Users/smy/project/book-agent/src/book_agent/services/style_drift.py)
+  - 新增 `profound_responsibility_literal`
+- [review.py](/Users/smy/project/book-agent/src/book_agent/services/review.py)
+  - `STYLE_DRIFT` issue evidence 现开始携带 `prompt_guidance`
+- [rerun.py](/Users/smy/project/book-agent/src/book_agent/orchestrator/rerun.py)
+  - `style_hints_for_issue()` 现会同时注入：
+    - `Rerun focus [...]`
+    - `Rerun guidance [...]`
+
+工程结论：
+
+- `section_brief + discourse_bridge` 这条线值得保留在默认生产链路中
+  - 它没有引入 schema 迁移
+  - 但已经把“这一段在本节中扮演什么角色”显式喂给模型
+- 下一类高价值工作，不应该是重新膨胀默认 prompt
+  - 更稳的方向是继续沿共享窄规则扩 `STYLE_DRIFT -> rerun guidance`
+  - 这样首轮 prompt 和 targeted rerun 可以共用一套语言质量知识
+
+本轮验证：
+
+- `uv run pytest tests/test_translation_worker_abstraction.py -q -k "literalism_guardrail or section_level_scaffolding or discourse_bridge or supports_prompt_profiles"`
+  - `10 passed`
+- `uv run pytest tests/test_persistence_and_review.py -q -k "test_review_reports_style_drift_literalism_as_non_blocking_advisory or test_review_reports_durable_substrate_literalism_as_non_blocking_advisory or test_review_reports_profound_responsibility_literalism_as_non_blocking_advisory or test_packet_style_drift_action_rerun_uses_aggregated_hints_and_resolves_packet_issues"`
+  - `4 passed`
+- `uv run pytest tests/test_rule_engine.py -q -k "style_hint"`
+  - `1 passed`
+- `uv run ruff check src/book_agent/services/style_drift.py src/book_agent/services/review.py src/book_agent/orchestrator/rerun.py tests/test_translation_worker_abstraction.py tests/test_persistence_and_review.py tests/test_rule_engine.py`
+  - `All checks passed`
+
+残余问题：
+
+- 这轮仍然没有发起新的真实 single-packet execute；当前验证停留在 compile/prompt/review/rerun contract
+- 更宽的 `tests/test_persistence_and_review.py -k "style_drift or literalism"` 会碰到一个与本 slice 无直接关系的旧 `StaleDataError` 工作流用例，后续需要单独清理

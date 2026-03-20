@@ -451,6 +451,7 @@ class ReviewService:
                             "actual_target_text": aligned_text,
                             "matched_target_excerpt": target_match.group(0),
                             "preferred_hint": rule.preferred_hint,
+                            "prompt_guidance": rule.prompt_guidance,
                             "chapter_memory_snapshot_version": chapter_memory_snapshot_version,
                             "message": rule.message,
                         },

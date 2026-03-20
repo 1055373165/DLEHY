@@ -8,6 +8,7 @@ from book_agent.domain.models import Sentence
 from book_agent.workers.contracts import (
     AlignmentSuggestion,
     ContextPacket,
+    PacketBlock,
     TranslationTargetSegment,
     TranslationUsage,
     TranslationWorkerOutput,
@@ -151,6 +152,24 @@ def _paragraph_intent_lines(packet: ContextPacket) -> list[str]:
         lines.append(f"- Intent: {intent}")
     if hint:
         lines.append(f"- Hint: {hint}")
+    return lines
+
+
+def _section_scaffolding_lines(packet: ContextPacket) -> list[str]:
+    lines: list[str] = []
+    if packet.section_brief:
+        lines.append(f"- Section Brief: {packet.section_brief}")
+    bridge = packet.discourse_bridge
+    if bridge is None:
+        return lines
+    if bridge.previous_paragraph_role:
+        lines.append(f"- Previous Paragraph Role: {bridge.previous_paragraph_role}")
+    if bridge.current_paragraph_role:
+        lines.append(f"- Current Paragraph Role: {bridge.current_paragraph_role}")
+    if bridge.relation_to_previous:
+        lines.append(f"- Relation to Previous: {bridge.relation_to_previous}")
+    if bridge.active_referents:
+        lines.append(f"- Active Referents: {', '.join(bridge.active_referents)}")
     return lines
 
 
@@ -520,6 +539,7 @@ def build_translation_prompt_request(
     next_block_lines = _packet_block_lines(packet.next_blocks)
     current_paragraph_lines = _current_paragraph_lines(packet)
     paragraph_intent_lines = _paragraph_intent_lines(packet)
+    section_scaffolding_lines = _section_scaffolding_lines(packet)
     literalism_guardrail_lines = _literalism_guardrail_lines(packet)
     if minimal_material_prompt and prompt_layout == "paragraph-led":
         alias_order = list(sentence_alias_map.keys())
@@ -613,6 +633,7 @@ def build_translation_prompt_request(
         (not compact_prompt and prompt_profile in {"role-style-v2", "role-style-memory-v2", "role-style-brief-v3"})
         or prompt_profile in {"material-aware-v1", "material-aware-minimal-v1"}
     ):
+        _extend_section(sections, "Section-Level Scaffolding:", section_scaffolding_lines)
         _extend_section(sections, "Paragraph Intent Signal:", paragraph_intent_lines)
         _extend_section(sections, "Source-Aware Literalism Guardrails:", literalism_guardrail_lines)
     if memory_handling_lines:

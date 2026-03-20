@@ -46,12 +46,15 @@ Last Updated: 2026-03-20
 这部分是给下一个程序员看的“接力起点”。如果你只读一段，优先读这里。
 
 - 刚完成的最新一刀：
+  - `chapter-intro title cleanup v2`：修正真实长书 intro title 中的 article/question 误粘连与 epigraph sentence restart 泄漏
   - 针对真实英文书分页区域，修复了 4 类结构错误：`inline heading` 丢失、`contextual image legend` 被并进正文、跨页 bullet 被误切且前半段被误判成 code、页内图片排序错误
 - 本轮主要修改入口：
-  - `/Users/smy/projects/mygithub/DLEHY/src/book_agent/domain/structure/pdf.py`
-  - `/Users/smy/projects/mygithub/DLEHY/src/book_agent/services/export.py`
-  - `/Users/smy/projects/mygithub/DLEHY/tests/test_pdf_support.py`
+  - `/Users/smy/project/book-agent/src/book_agent/domain/structure/pdf.py`
+  - `/Users/smy/project/book-agent/tests/test_pdf_support.py`
 - 本轮 parser/export 关键变化：
+  - intro title cleanup 不再把正常 `A deep` / `you go` 误粘成 `Adeep` / `yougo`
+  - 当 chapter-intro title 后紧跟 uppercase spaced-letter epigraph / quote restart 时，会在 parser 侧直接截断，避免 `Dataislikegarbage` 这类句子残片泄漏到标题
+  - 单块 `title + epigraph` 合并场景现已进入回归测试，不再只覆盖双块标题页
   - 页内 block 恢复不再默认“先全部文本、后全部图片”，而是对书籍场景启用 `text/image` 交错排序
   - 新增 inline book heading promotion，`Tokenization: Breaking Text into Pieces` 这类标题会被提升成真实 `heading`
   - 新增 contextual image legend promotion，`This sentence contains 27 tokens` 这类短图例会独立保留并作为 caption 候选
@@ -60,6 +63,13 @@ Last Updated: 2026-03-20
 
 ### Latest Real-Book Validation
 
+- 最新 parser targeted 验收：
+  - 样本：`LLMs in Production`
+  - 验收方式：直接 parse 真实样本的 3 个 chapter-intro 起始页，不重跑整本 translation
+  - 已确认收敛：
+    - page `42`：`Large language models: A deep dive into language modeling`
+    - page `133`：`Data engineering for large language models: Setting up for success`
+    - page `377`：`Deploying an LLM on a Raspberry Pi: How low can you go?`
 - 最新真实验收样本：
   - 源文件：`/Users/smy/Downloads/Patterns of Application Development Using AI (Obie Fernandez) (z-library.sk, 1lib.sk, z-lib.sk).pdf`
   - 验收目标：首个正文主章节 `Introduction`
@@ -234,10 +244,7 @@ Last Updated: 2026-03-20
 - 语义化 table export 当前只覆盖规则较稳定的可恢复表格；复杂跨页/合并单元格表格仍以 preserve/fallback 为主
 - code continuity repair 当前只处理“夹在两段代码之间的无 caption 可疑图片”这一类误插入，不等于已完全解决复杂版式下的 code/figure 边界
 - appendix 内更细 section tree 仍未正式进入公共 contract
-- `LLMs in Production` 仍残留更深层 extractor 断词噪声：
-  - `Adeep`
-  - `Dataislikegarbage`
-  - `canyougo`
+- `LLMs in Production` 的 chapter-intro title 噪声已进一步压下去，但正文更深层 extractor 断词仍未系统治理
 - `backmatter` 当前仍偏 explicit-cue policy
 
 ## Immediate Next Work

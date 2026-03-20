@@ -268,8 +268,20 @@
           "equals": "Words awakening: Why large language models have captured attention"
         },
         {
+          "path": "parse_summary.chapter_titles.2",
+          "equals": "Large language models: A deep dive into language modeling"
+        },
+        {
+          "path": "parse_summary.chapter_titles.4",
+          "equals": "Data engineering for large language models: Setting up for success"
+        },
+        {
           "path": "parse_summary.chapter_titles.7",
           "equals": "Prompt engineering: Becoming an LLM whisperer"
+        },
+        {
+          "path": "parse_summary.chapter_titles.11",
+          "equals": "Deploying an LLM on a Raspberry Pi: How low can you go?"
         },
         {
           "path": "parse_summary.chapter_titles.13",

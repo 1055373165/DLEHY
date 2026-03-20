@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +38,7 @@ def main() -> int:
     )
     parser.add_argument("--selected-packet-limit", type=int, default=3)
     parser.add_argument("--no-execute", action="store_true")
+    parser.add_argument("--disable-issue-priority", action="store_true")
     parser.add_argument(
         "--prompt-layout",
         choices=("paragraph-led", "sentence-led"),
@@ -86,6 +89,7 @@ def main() -> int:
                 options=TranslationChapterSmokeOptions(
                     selected_packet_limit=args.selected_packet_limit,
                     execute_selected=not args.no_execute,
+                    prefer_issue_driven_packets=not args.disable_issue_priority,
                     include_memory_blocks=not args.disable_memory_blocks,
                     include_chapter_concepts=not args.disable_chapter_concepts,
                     prefer_memory_chapter_brief=not args.disable_memory_brief,

@@ -1270,6 +1270,8 @@ class DocumentWorkflowService:
         # on the same affected packet set.
         eligible_issue_types = {"STYLE_DRIFT", "TERM_CONFLICT", "UNLOCKED_KEY_CONCEPT"}
         packet_issue_counts: dict[str, int] = {}
+        packet_non_style_issue_counts: dict[str, int] = {}
+        packet_issue_types: dict[str, set[str]] = {}
         for issue in artifacts.issues:
             if issue.issue_type not in eligible_issue_types:
                 continue
@@ -1279,6 +1281,11 @@ class DocumentWorkflowService:
                 continue
             for packet_id in self._review_issue_followup_packet_ids(issue):
                 packet_issue_counts[packet_id] = packet_issue_counts.get(packet_id, 0) + 1
+                packet_issue_types.setdefault(packet_id, set()).add(issue.issue_type)
+                if issue.issue_type != "STYLE_DRIFT":
+                    packet_non_style_issue_counts[packet_id] = (
+                        packet_non_style_issue_counts.get(packet_id, 0) + 1
+                    )
 
         filtered_actions: list[IssueAction] = []
         projected_rerun_plans: dict[str, object] = {}
@@ -1303,26 +1310,42 @@ class DocumentWorkflowService:
         candidate_actions: list[IssueAction] = []
         seen_packet_ids: set[str] = set()
 
-        def _candidate_priority(action: IssueAction) -> tuple[int, int, int, str, str]:
+        def _packet_priority(packet_ids: list[str]) -> int:
+            if any(
+                packet_non_style_issue_counts.get(packet_id, 0) > 0
+                or len(packet_issue_types.get(packet_id, set())) > 1
+                for packet_id in packet_ids
+            ):
+                return 0
+            if any(packet_issue_counts.get(packet_id, 0) > 0 for packet_id in packet_ids):
+                return 1
+            return 2
+
+        def _candidate_priority(action: IssueAction) -> tuple[int, int, int, int, int, str, str]:
             issue = issue_by_id.get(action.issue_id)
             rerun_plan = projected_rerun_plans.get(action.id)
             if issue is None:
-                return (2, 2, 0, str(action.scope_id), action.id)
+                return (2, 2, 3, 0, 0, str(action.scope_id), action.id)
             type_priority = {
                 "TERM_CONFLICT": 0,
                 "UNLOCKED_KEY_CONCEPT": 1,
                 "STYLE_DRIFT": 2,
             }.get(issue.issue_type, 3)
+            scope_ids = rerun_plan.scope_ids if rerun_plan is not None else [str(action.scope_id)]
+            packet_priority = _packet_priority(scope_ids)
+            packet_non_style_weight = sum(
+                packet_non_style_issue_counts.get(packet_id, 0) for packet_id in scope_ids
+            )
             packet_weight = (
-                sum(packet_issue_counts.get(packet_id, 0) for packet_id in rerun_plan.scope_ids)
-                if rerun_plan is not None
-                else packet_issue_counts.get(str(action.scope_id), 0)
+                sum(packet_issue_counts.get(packet_id, 0) for packet_id in scope_ids)
             )
             return (
                 0 if issue.blocking else 1,
                 type_priority,
+                packet_priority,
+                -packet_non_style_weight,
                 -packet_weight,
-                ",".join(rerun_plan.scope_ids) if rerun_plan is not None else str(action.scope_id),
+                ",".join(scope_ids),
                 action.id,
             )
 

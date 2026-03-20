@@ -49,6 +49,13 @@ class ConceptCandidate(BaseSchema):
     times_seen: int = 1
 
 
+class DiscourseBridge(BaseSchema):
+    previous_paragraph_role: str | None = None
+    current_paragraph_role: str | None = None
+    relation_to_previous: str | None = None
+    active_referents: list[str] = Field(default_factory=list)
+
+
 class ContextPacket(BaseSchema):
     packet_id: str
     document_id: str
@@ -66,6 +73,8 @@ class ContextPacket(BaseSchema):
     relevant_entities: list[RelevantEntity] = Field(default_factory=list)
     protected_spans: list[ProtectedSpan] = Field(default_factory=list)
     chapter_brief: str | None = None
+    section_brief: str | None = None
+    discourse_bridge: DiscourseBridge | None = None
     style_constraints: dict[str, str | bool | int | float] = Field(default_factory=dict)
     open_questions: list[str] = Field(default_factory=list)
     budget_hint: dict[str, int] = Field(default_factory=dict)

@@ -1,7 +1,7 @@
 # Chapter-Local Translation Memory Design
 
-Last Updated: 2026-03-17
-Status: draft-for-implementation
+Last Updated: 2026-03-20
+Status: partially-implemented
 
 相关驾驶舱文档：
 
@@ -79,6 +79,12 @@ Status: draft-for-implementation
 新增运行时对象：
 
 `CompiledTranslationContext`
+
+当前状态：
+
+- runtime-only `section_brief + discourse_bridge` 已进入 `context_compile -> prompt` 主链路
+- `packet_experiment` 也已暴露这两个信号的 presence
+- 持久化 writeback 仍未完成，当前仍属于“先在运行时验证收益，再决定是否进 memory schema”的阶段
 
 建议结构：
 

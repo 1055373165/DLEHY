@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 from http.client import IncompleteRead
 import tempfile
 import unittest
@@ -18,18 +20,23 @@ from book_agent.domain.enums import (
     ArtifactStatus,
     BlockType,
     ChapterStatus,
+    Detector,
     DocumentStatus,
+    IssueStatus,
     MemoryStatus,
     MemoryScopeType,
     PacketSentenceRole,
     PacketStatus,
     PacketType,
     ProtectedPolicy,
+    RootCauseLayer,
+    Severity,
     SnapshotType,
     SentenceStatus,
     SourceType,
 )
 from book_agent.domain.models import Block, Chapter, Document, MemorySnapshot, Sentence
+from book_agent.domain.models.review import ReviewIssue
 from book_agent.domain.models.translation import AlignmentEdge, PacketSentenceMap, TranslationPacket
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
@@ -58,6 +65,7 @@ from book_agent.workers.contracts import (
     AlignmentSuggestion,
     ConceptCandidate,
     ContextPacket,
+    DiscourseBridge,
     PacketBlock,
     RelevantTerm,
     TranslatedContextBlock,
@@ -837,6 +845,79 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertIn("Literalism Guardrails:", brief_prompt.user_prompt)
         self.assertIn("Chapter Brief as the purpose summary of this section", brief_prompt.user_prompt)
 
+    def test_build_translation_prompt_request_includes_section_level_scaffolding(self) -> None:
+        context_packet = ContextPacket(
+            packet_id="pkt-scaffold",
+            document_id="doc-1",
+            chapter_id="ch-1",
+            packet_type="translate",
+            book_profile_version=1,
+            chapter_brief_version=1,
+            heading_path=["Chapter One", "Context Engineering"],
+            current_blocks=[
+                PacketBlock(
+                    block_id="block-1",
+                    block_type="paragraph",
+                    sentence_ids=["s1"],
+                    text="Context engineering is the deliberate design of inputs, memory, and tools.",
+                )
+            ],
+            chapter_brief="This chapter explains why context engineering changes how engineers guide agentic systems.",
+            section_brief="This part of the section 'Context Engineering' defines context engineering and clarifies how it should be understood in the chapter.",
+            discourse_bridge=DiscourseBridge(
+                previous_paragraph_role="analogy",
+                current_paragraph_role="concept definition",
+                relation_to_previous="moves from analogy into concept definition",
+                active_referents=["context engineering", "agentic systems"],
+            ),
+            style_constraints={
+                "paragraph_intent": "definition",
+                "paragraph_intent_hint": "Treat this as concept-definition prose.",
+                "literalism_guardrails": "Prefer '上下文工程' for context engineering.",
+            },
+            relevant_terms=[
+                RelevantTerm(
+                    source_term="context engineering",
+                    target_term="上下文工程",
+                    lock_level="locked",
+                )
+            ],
+        )
+        current_sentences = [
+            Sentence(
+                id="s1",
+                block_id="block-1",
+                chapter_id="ch-1",
+                document_id="doc-1",
+                ordinal_in_block=1,
+                source_text="Context engineering is the deliberate design of inputs, memory, and tools.",
+                normalized_text="Context engineering is the deliberate design of inputs, memory, and tools.",
+                source_lang="en",
+                translatable=True,
+                nontranslatable_reason=None,
+                source_anchor=None,
+                source_span_json={},
+                upstream_confidence=1.0,
+                sentence_status=SentenceStatus.PENDING,
+                active_version=1,
+            )
+        ]
+
+        prompt_request = build_translation_prompt_request(
+            TranslationTask(context_packet=context_packet, current_sentences=current_sentences),
+            model_name="mock-llm",
+            prompt_version="section-scaffold-test",
+            prompt_profile="role-style-v2",
+            allow_compact_prompt=False,
+        )
+
+        self.assertIn("Section-Level Scaffolding:", prompt_request.user_prompt)
+        self.assertIn("Section Brief: This part of the section 'Context Engineering' defines context engineering", prompt_request.user_prompt)
+        self.assertIn("Previous Paragraph Role: analogy", prompt_request.user_prompt)
+        self.assertIn("Current Paragraph Role: concept definition", prompt_request.user_prompt)
+        self.assertIn("Relation to Previous: moves from analogy into concept definition", prompt_request.user_prompt)
+        self.assertIn("Active Referents: context engineering, agentic systems", prompt_request.user_prompt)
+
     def test_build_translation_prompt_request_supports_material_aware_profiles(self) -> None:
         technical_packet = ContextPacket(
             packet_id="pkt-tech",
@@ -1075,6 +1156,35 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertIn("从我这位……的角度看 / 站在……的角度看", literalism)
         self.assertIn("风险极高 / 代价极高", literalism)
         self.assertIn("只是个趣闻 / 只是个小插曲", literalism)
+
+    def test_context_compiler_infers_profound_responsibility_literalism_guardrail(self) -> None:
+        packet = ContextPacket(
+            packet_id="pkt-responsibility",
+            document_id="doc-1",
+            chapter_id="ch-1",
+            packet_type="translate",
+            book_profile_version=1,
+            chapter_brief_version=1,
+            heading_path=["Chapter One"],
+            current_blocks=[
+                PacketBlock(
+                    block_id="block-responsibility",
+                    block_type="paragraph",
+                    sentence_ids=["s1"],
+                    text=(
+                        "Deploying agentic systems in production requires a profound sense of responsibility."
+                    ),
+                )
+            ],
+            chapter_brief="This chapter discusses production-grade deployment and governance.",
+            style_constraints={"tone": "faithful-clear"},
+        )
+
+        compiled = ChapterContextCompiler().compile(packet, chapter_memory_snapshot=None)
+
+        literalism = str(compiled.style_constraints["literalism_guardrails"])
+        self.assertIn("强烈的责任感 / 很强的责任意识", literalism)
+        self.assertIn("深刻的责任感", literalism)
 
     def test_context_compiler_infers_knowledge_timeline_literalism_guardrail(self) -> None:
         packet = ContextPacket(
@@ -1647,6 +1757,63 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertEqual([concept.source_term for concept in compiled.chapter_concepts], ["durable memory"])
         self.assertEqual([term.source_term for term in compiled.relevant_terms], ["durable memory"])
 
+    def test_context_compiler_builds_section_brief_and_discourse_bridge(self) -> None:
+        packet = ContextPacket(
+            packet_id="pkt-discourse",
+            document_id="doc-1",
+            chapter_id="ch-1",
+            packet_type="translate",
+            book_profile_version=1,
+            chapter_brief_version=1,
+            heading_path=["Chapter One", "Context Engineering"],
+            current_blocks=[
+                PacketBlock(
+                    block_id="block-current",
+                    block_type="paragraph",
+                    sentence_ids=["s1"],
+                    text="Context engineering is the deliberate design of context, memory, and tools for an agentic system.",
+                )
+            ],
+            prev_blocks=[
+                PacketBlock(
+                    block_id="block-prev",
+                    block_type="paragraph",
+                    sentence_ids=["sp1"],
+                    text="If chat is a recipe book, agentic systems behave more like a personal chef.",
+                )
+            ],
+            chapter_brief="This chapter explains why context engineering changes how engineers guide agentic systems.",
+            relevant_terms=[
+                RelevantTerm(
+                    source_term="context engineering",
+                    target_term="上下文工程",
+                    lock_level="locked",
+                ),
+                RelevantTerm(
+                    source_term="agentic systems",
+                    target_term="智能体式系统",
+                    lock_level="locked",
+                ),
+            ],
+        )
+
+        compiled = ChapterContextCompiler().compile(packet, chapter_memory_snapshot=None)
+
+        self.assertIsNotNone(compiled.section_brief)
+        self.assertIn("defines context engineering", compiled.section_brief or "")
+        self.assertIsNotNone(compiled.discourse_bridge)
+        assert compiled.discourse_bridge is not None
+        self.assertEqual(compiled.discourse_bridge.previous_paragraph_role, "analogy")
+        self.assertEqual(compiled.discourse_bridge.current_paragraph_role, "concept definition")
+        self.assertEqual(
+            compiled.discourse_bridge.relation_to_previous,
+            "moves from analogy into concept definition",
+        )
+        self.assertEqual(
+            compiled.discourse_bridge.active_referents,
+            ["context engineering", "agentic systems"],
+        )
+
     def test_packet_experiment_service_dry_run_exports_prompt_without_worker_output(self) -> None:
         _, packet_ids = self._bootstrap_to_db()
         packet_id = packet_ids[1]
@@ -1802,6 +1969,73 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertEqual(
             artifacts.payload["options"]["rerun_hints"][0],
             "Rerun focus [context_engineering_literal]: prefer '上下文工程' over literal phrasing in this packet.",
+        )
+
+    def test_packet_experiment_service_can_resolve_review_issue_ids_into_rerun_context(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        packet_id = packet_ids[2]
+
+        with self.session_factory() as session:
+            repository = TranslationRepository(session)
+            bundle = repository.load_packet_bundle(packet_id)
+            now = datetime.now(timezone.utc)
+            issue = ReviewIssue(
+                id="issue-style-1",
+                document_id=document_id,
+                chapter_id=bundle.packet.chapter_id,
+                block_id=None,
+                sentence_id=bundle.current_sentences[0].id,
+                packet_id=packet_id,
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={
+                    "style_rule": "contextually_accurate_outputs_literal",
+                    "preferred_hint": "更符合上下文的输出",
+                    "prompt_guidance": (
+                        "Prefer '更符合上下文的输出' or an equally natural Chinese expression, "
+                        "not literal forms like '上下文更准确的输出'."
+                    ),
+                },
+                status=IssueStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(issue)
+            session.commit()
+
+            service = PacketExperimentService(
+                repository,
+                settings=Settings(translation_backend="echo", translation_model="echo-worker"),
+            )
+            artifacts = service.run(
+                packet_id,
+                PacketExperimentOptions(
+                    prompt_layout="paragraph-led",
+                    review_issue_ids=(issue.id,),
+                ),
+            )
+
+        self.assertIn("Open Questions and Rerun Hints:", artifacts.payload["prompt_request"]["user_prompt"])
+        self.assertIn(
+            "Rerun focus [contextually_accurate_outputs_literal]: prefer '更符合上下文的输出' over literal phrasing in this packet.",
+            artifacts.payload["prompt_request"]["user_prompt"],
+        )
+        self.assertIn(
+            "Rerun guidance [contextually_accurate_outputs_literal]: Prefer '更符合上下文的输出' or an equally natural Chinese expression, not literal forms like '上下文更准确的输出'.",
+            artifacts.payload["prompt_request"]["user_prompt"],
+        )
+        self.assertEqual(artifacts.payload["options"]["review_issue_ids"], [issue.id])
+        self.assertEqual(artifacts.payload["rerun_context"]["review_issue_count"], 1)
+        self.assertEqual(
+            artifacts.payload["rerun_context"]["resolved_rerun_hints"],
+            [
+                "Rerun focus [contextually_accurate_outputs_literal]: prefer '更符合上下文的输出' over literal phrasing in this packet.",
+                "Rerun guidance [contextually_accurate_outputs_literal]: Prefer '更符合上下文的输出' or an equally natural Chinese expression, not literal forms like '上下文更准确的输出'.",
+            ],
         )
 
     def test_translation_service_execute_packet_accepts_rerun_overrides_and_hints(self) -> None:
@@ -2071,6 +2305,66 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
                 ]
             )
             session.commit()
+            now = datetime.now(timezone.utc)
+            session.add_all(
+                [
+                    ReviewIssue(
+                        id="issue-style-a",
+                        document_id=document_id,
+                        chapter_id=chapter_id,
+                        block_id=None,
+                        sentence_id=None,
+                        packet_id=packet_a_id,
+                        issue_type="STYLE_DRIFT",
+                        root_cause_layer=RootCauseLayer.PACKET,
+                        severity=Severity.MEDIUM,
+                        blocking=False,
+                        detector=Detector.RULE,
+                        confidence=1.0,
+                        evidence_json={},
+                        status=IssueStatus.OPEN,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    ReviewIssue(
+                        id="issue-term-b",
+                        document_id=document_id,
+                        chapter_id=chapter_id,
+                        block_id=None,
+                        sentence_id=None,
+                        packet_id=packet_b_id,
+                        issue_type="TERM_CONFLICT",
+                        root_cause_layer=RootCauseLayer.PACKET,
+                        severity=Severity.MEDIUM,
+                        blocking=False,
+                        detector=Detector.RULE,
+                        confidence=1.0,
+                        evidence_json={},
+                        status=IssueStatus.OPEN,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    ReviewIssue(
+                        id="issue-style-b",
+                        document_id=document_id,
+                        chapter_id=chapter_id,
+                        block_id=None,
+                        sentence_id=None,
+                        packet_id=packet_b_id,
+                        issue_type="STYLE_DRIFT",
+                        root_cause_layer=RootCauseLayer.PACKET,
+                        severity=Severity.MEDIUM,
+                        blocking=False,
+                        detector=Detector.RULE,
+                        confidence=1.0,
+                        evidence_json={},
+                        status=IssueStatus.OPEN,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ]
+            )
+            session.commit()
 
             scan_service = PacketExperimentScanService(
                 TranslationRepository(session),
@@ -2079,8 +2373,21 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
             artifacts = scan_service.scan_chapter(chapter_id)
 
         self.assertEqual(artifacts.payload["packet_count"], 2)
+        self.assertEqual(artifacts.payload["unresolved_packet_issue_count"], 3)
         self.assertEqual(artifacts.payload["top_candidate"]["packet_id"], packet_a_id)
         self.assertGreater(artifacts.payload["entries"][0]["memory_signal_score"], artifacts.payload["entries"][1]["memory_signal_score"])
+        entry_by_packet = {entry["packet_id"]: entry for entry in artifacts.payload["entries"]}
+        self.assertEqual(entry_by_packet[packet_a_id]["unresolved_issue_count"], 1)
+        self.assertEqual(entry_by_packet[packet_a_id]["issue_priority_tier"], 1)
+        self.assertFalse(entry_by_packet[packet_a_id]["has_non_style_issue"])
+        self.assertEqual(entry_by_packet[packet_b_id]["unresolved_issue_count"], 2)
+        self.assertEqual(entry_by_packet[packet_b_id]["issue_priority_tier"], 0)
+        self.assertTrue(entry_by_packet[packet_b_id]["has_non_style_issue"])
+        self.assertTrue(entry_by_packet[packet_b_id]["mixed_issue_types"])
+        self.assertEqual(
+            entry_by_packet[packet_b_id]["unresolved_issue_types"],
+            ["STYLE_DRIFT", "TERM_CONFLICT"],
+        )
 
     def test_translation_chapter_smoke_selects_top_packets_and_summarizes_style_drift(self) -> None:
         packet_a_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
@@ -2181,6 +2488,159 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertEqual(artifacts.payload["aggregate_summary"]["total_style_drift_hits"], 1)
         self.assertEqual(artifacts.payload["packet_results"][0]["style_drift_hits"], ["context_engineering_literal"])
         self.assertEqual(artifacts.payload["aggregate_summary"]["total_cost_usd"], 0.1)
+
+    def test_translation_chapter_smoke_prioritizes_issue_driven_packets_by_default(self) -> None:
+        packet_a_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+        packet_b_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+
+        class StubScanService:
+            def scan_chapter(self, chapter_id: str, *, options: PacketExperimentOptions | None = None):
+                return type(
+                    "Artifacts",
+                    (),
+                    {
+                        "payload": {
+                            "chapter_id": chapter_id,
+                            "packet_count": 2,
+                            "entries": [
+                                {
+                                    "packet_id": packet_a_id,
+                                    "memory_signal_score": 300,
+                                    "current_sentence_count": 2,
+                                    "unresolved_issue_count": 2,
+                                    "style_drift_issue_count": 2,
+                                    "non_style_issue_count": 0,
+                                    "has_non_style_issue": False,
+                                    "mixed_issue_types": False,
+                                    "issue_priority_tier": 1,
+                                    "issue_priority_reason": "style_only",
+                                },
+                                {
+                                    "packet_id": packet_b_id,
+                                    "memory_signal_score": 120,
+                                    "current_sentence_count": 1,
+                                    "unresolved_issue_count": 2,
+                                    "style_drift_issue_count": 1,
+                                    "non_style_issue_count": 1,
+                                    "has_non_style_issue": True,
+                                    "mixed_issue_types": True,
+                                    "issue_priority_tier": 0,
+                                    "issue_priority_reason": "mixed_or_non_style",
+                                },
+                            ],
+                        }
+                    },
+                )()
+
+        class StubExperimentService:
+            def run(self, packet_id: str, options: PacketExperimentOptions):
+                return type(
+                    "Artifacts",
+                    (),
+                    {
+                        "payload": {
+                            "context_packet": {"current_blocks": []},
+                            "context_sources": {},
+                            "worker_output": {
+                                "target_segments": [],
+                                "alignment_suggestions": [],
+                                "low_confidence_flags": [],
+                            },
+                            "usage": {"cost_usd": 0.0},
+                            "prompt_request": {"user_prompt": "prompt"},
+                        }
+                    },
+                )()
+
+        smoke_service = TranslationChapterSmokeService(
+            experiment_service=StubExperimentService(),
+            scan_service=StubScanService(),
+        )
+        artifacts = smoke_service.run_chapter(
+            "chapter-1",
+            options=TranslationChapterSmokeOptions(selected_packet_limit=1, execute_selected=True),
+        )
+
+        self.assertEqual(artifacts.payload["selected_packet_ids"], [packet_b_id])
+        self.assertEqual(artifacts.payload["aggregate_summary"]["selected_mixed_issue_packet_count"], 1)
+        self.assertEqual(artifacts.payload["aggregate_summary"]["selected_non_style_issue_packet_count"], 1)
+        self.assertEqual(artifacts.payload["packet_results"][0]["issue_priority_tier"], 0)
+
+    def test_translation_chapter_smoke_can_disable_issue_priority_and_keep_scan_order(self) -> None:
+        packet_a_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+        packet_b_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+
+        class StubScanService:
+            def scan_chapter(self, chapter_id: str, *, options: PacketExperimentOptions | None = None):
+                return type(
+                    "Artifacts",
+                    (),
+                    {
+                        "payload": {
+                            "chapter_id": chapter_id,
+                            "packet_count": 2,
+                            "entries": [
+                                {
+                                    "packet_id": packet_a_id,
+                                    "memory_signal_score": 300,
+                                    "current_sentence_count": 2,
+                                    "unresolved_issue_count": 2,
+                                    "style_drift_issue_count": 2,
+                                    "non_style_issue_count": 0,
+                                    "has_non_style_issue": False,
+                                    "mixed_issue_types": False,
+                                    "issue_priority_tier": 1,
+                                },
+                                {
+                                    "packet_id": packet_b_id,
+                                    "memory_signal_score": 120,
+                                    "current_sentence_count": 1,
+                                    "unresolved_issue_count": 2,
+                                    "style_drift_issue_count": 1,
+                                    "non_style_issue_count": 1,
+                                    "has_non_style_issue": True,
+                                    "mixed_issue_types": True,
+                                    "issue_priority_tier": 0,
+                                },
+                            ],
+                        }
+                    },
+                )()
+
+        class StubExperimentService:
+            def run(self, packet_id: str, options: PacketExperimentOptions):
+                return type(
+                    "Artifacts",
+                    (),
+                    {
+                        "payload": {
+                            "context_packet": {"current_blocks": []},
+                            "context_sources": {},
+                            "worker_output": {
+                                "target_segments": [],
+                                "alignment_suggestions": [],
+                                "low_confidence_flags": [],
+                            },
+                            "usage": {"cost_usd": 0.0},
+                            "prompt_request": {"user_prompt": "prompt"},
+                        }
+                    },
+                )()
+
+        smoke_service = TranslationChapterSmokeService(
+            experiment_service=StubExperimentService(),
+            scan_service=StubScanService(),
+        )
+        artifacts = smoke_service.run_chapter(
+            "chapter-1",
+            options=TranslationChapterSmokeOptions(
+                selected_packet_limit=1,
+                execute_selected=True,
+                prefer_issue_driven_packets=False,
+            ),
+        )
+
+        self.assertEqual(artifacts.payload["selected_packet_ids"], [packet_a_id])
 
     def test_translation_chapter_smoke_requires_source_pattern_match_for_style_drift(self) -> None:
         packet_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"

@@ -8,7 +8,14 @@ from typing import Any
 
 from book_agent.core.config import Settings
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
+from book_agent.infra.repositories.ops import OpsRepository
 from book_agent.infra.repositories.translation import TranslationRepository
+from book_agent.orchestrator.rerun import (
+    concept_overrides_for_issue,
+    merge_concept_overrides,
+    merge_style_hints,
+    style_hints_for_issue,
+)
 from book_agent.services.context_compile import ChapterContextCompileOptions, ChapterContextCompiler
 from book_agent.workers.contracts import ConceptCandidate, TranslationUsage, TranslationWorkerOutput, TranslationWorkerResult
 from book_agent.workers.translator import (
@@ -83,6 +90,7 @@ class PacketExperimentOptions:
     execute: bool = False
     concept_overrides: tuple[ConceptCandidate, ...] = ()
     rerun_hints: tuple[str, ...] = ()
+    review_issue_ids: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -99,6 +107,7 @@ class PacketExperimentService:
         worker: TranslationWorker | None = None,
         chapter_memory_repository: ChapterTranslationMemoryRepository | None = None,
         context_compiler: ChapterContextCompiler | None = None,
+        ops_repository: OpsRepository | None = None,
     ):
         self.repository = repository
         self.settings = settings
@@ -107,6 +116,7 @@ class PacketExperimentService:
             repository.session
         )
         self.context_compiler = context_compiler or ChapterContextCompiler()
+        self.ops_repository = ops_repository or OpsRepository(repository.session)
 
     def run(self, packet_id: str, options: PacketExperimentOptions) -> PacketExperimentArtifacts:
         bundle = self.repository.load_packet_bundle(packet_id)
@@ -114,6 +124,7 @@ class PacketExperimentService:
             document_id=bundle.context_packet.document_id,
             chapter_id=bundle.context_packet.chapter_id,
         )
+        resolved_concept_overrides, resolved_rerun_hints, review_issue_context = self._resolve_rerun_inputs(options)
         compiled_context = self.context_compiler.compile(
             bundle.context_packet,
             chapter_memory_snapshot=chapter_memory_snapshot,
@@ -126,12 +137,12 @@ class PacketExperimentService:
                 ),
                 include_paragraph_intent=options.include_paragraph_intent,
                 include_literalism_guardrails=options.include_literalism_guardrails,
-                concept_overrides=options.concept_overrides,
+                concept_overrides=resolved_concept_overrides,
             ),
         )
-        if options.rerun_hints:
+        if resolved_rerun_hints:
             merged_open_questions = list(compiled_context.open_questions)
-            for hint in options.rerun_hints:
+            for hint in resolved_rerun_hints:
                 if hint and hint not in merged_open_questions:
                     merged_open_questions.append(hint)
             compiled_context = compiled_context.model_copy(
@@ -196,6 +207,14 @@ class PacketExperimentService:
                 "execute": options.execute,
                 "concept_overrides": [concept.model_dump() for concept in options.concept_overrides],
                 "rerun_hints": list(options.rerun_hints),
+                "review_issue_ids": list(options.review_issue_ids),
+            },
+            "rerun_context": {
+                "review_issue_ids": list(options.review_issue_ids),
+                "review_issue_count": len(review_issue_context),
+                "review_issues": review_issue_context,
+                "resolved_concept_overrides": [concept.model_dump() for concept in resolved_concept_overrides],
+                "resolved_rerun_hints": list(resolved_rerun_hints),
             },
             "context_compile_version": self.context_compiler.compile_version,
             "chapter_memory_snapshot_id": (
@@ -231,6 +250,8 @@ class PacketExperimentService:
                     bool(compiled_context.chapter_brief)
                     and not bool(compiled_context.style_constraints.get("suppress_chapter_brief_in_prompt"))
                 ),
+                "compiled_section_brief_present": bool(compiled_context.section_brief),
+                "compiled_discourse_bridge_present": compiled_context.discourse_bridge is not None,
                 "chapter_brief_source": (
                     "memory"
                     if compiled_context.chapter_brief != bundle.context_packet.chapter_brief
@@ -261,6 +282,37 @@ class PacketExperimentService:
             "usage": usage.model_dump(mode="json"),
         }
         return PacketExperimentArtifacts(payload=payload)
+
+    def _resolve_rerun_inputs(
+        self,
+        options: PacketExperimentOptions,
+    ) -> tuple[tuple[ConceptCandidate, ...], tuple[str, ...], list[dict[str, Any]]]:
+        review_issue_context: list[dict[str, Any]] = []
+        review_issue_concept_groups: list[tuple[ConceptCandidate, ...]] = []
+        review_issue_hint_groups: list[tuple[str, ...]] = []
+        for issue_id in options.review_issue_ids:
+            issue = self.ops_repository.get_issue(issue_id)
+            issue_concepts = concept_overrides_for_issue(issue)
+            issue_hints = style_hints_for_issue(issue)
+            review_issue_concept_groups.append(issue_concepts)
+            review_issue_hint_groups.append(issue_hints)
+            evidence = issue.evidence_json or {}
+            review_issue_context.append(
+                {
+                    "issue_id": issue.id,
+                    "issue_type": issue.issue_type,
+                    "packet_id": issue.packet_id,
+                    "sentence_id": issue.sentence_id,
+                    "style_rule": str(evidence.get("style_rule") or "").strip() or None,
+                    "preferred_hint": str(evidence.get("preferred_hint") or "").strip() or None,
+                    "prompt_guidance": str(evidence.get("prompt_guidance") or "").strip() or None,
+                    "resolved_concept_overrides": [concept.model_dump() for concept in issue_concepts],
+                    "resolved_style_hints": list(issue_hints),
+                }
+            )
+        resolved_concepts = merge_concept_overrides([*review_issue_concept_groups, options.concept_overrides])
+        resolved_hints = merge_style_hints([*review_issue_hint_groups, options.rerun_hints])
+        return resolved_concepts, resolved_hints, review_issue_context
 
     def _planned_metadata(self) -> TranslationWorkerMetadata:
         runtime_config: dict[str, Any] = {"provider": self.settings.translation_backend}

@@ -45,10 +45,8 @@ class BootstrapRepository:
         self.session = session
 
     def _document_images_table_available(self) -> bool:
-        bind = self.session.get_bind()
-        if bind is None:
-            return False
-        return bool(inspect(bind).has_table(DocumentImage.__tablename__))
+        connection = self.session.connection()
+        return bool(inspect(connection).has_table(DocumentImage.__tablename__))
 
     def save(self, artifacts: BootstrapArtifacts) -> None:
         self.session.merge(artifacts.document)

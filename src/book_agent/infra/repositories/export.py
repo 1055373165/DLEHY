@@ -59,10 +59,8 @@ class ExportRepository:
         self.session = session
 
     def _document_images_table_available(self) -> bool:
-        bind = self.session.get_bind()
-        if bind is None:
-            return False
-        return bool(inspect(bind).has_table(DocumentImage.__tablename__))
+        connection = self.session.connection()
+        return bool(inspect(connection).has_table(DocumentImage.__tablename__))
 
     def get_document(self, document_id: str) -> Document:
         document = self.session.get(Document, document_id)

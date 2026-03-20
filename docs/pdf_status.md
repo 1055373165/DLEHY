@@ -102,6 +102,7 @@ Last Updated: 2026-03-20
 - 已完成 footnote relocater v3 第一刀：同页页底和跨页续页页顶的小字号 markerless 段落，现在可稳定并回前一个 footnote block
 - 已完成 footnote relocation evidence：`footnote_segment_count / footnote_segment_roles / footnote_relocation_modes` 已进入 block metadata，page evidence 也会显式暴露 `relocated_footnote_count / max_footnote_segment_count`
 - 已完成 long-book chapter-intro title cleanup 第一刀：`LLMs in Production` 中最明显的 PDF escape / spaced-word / sentence-tail 噪声已从 chapter titles 中压下去
+- 已完成 long-book chapter-intro title cleanup 第二刀：保留正常 `A deep` / `you go` 间距，并在单块 `title + epigraph` 合并场景下截断 uppercase spaced-letter 句子重启；`Adeep / Dataislikegarbage / canyougo` 这类真实样本噪声已从 chapter title 收敛
 - 已完成 footnote 结构 review：`FOOTNOTE_RECOVERY_REQUIRED`
 - 已完成 API / summary / frontend 对 `pdf_profile` 和章节结构风险的暴露
 - 已补齐 PDF 回归测试，覆盖 low-risk bootstrap、high-risk reject、medium-risk review、TOC 切章、bookmark 切章、footnote linkage/orphan、cross-page footnote continuation、next-page footnote start、page family 切章、outline + appendix 边界
@@ -129,7 +130,7 @@ Last Updated: 2026-03-20
 - code continuity repair 当前只桥接“无 caption、疑似误插入、位于两段 code 之间”的 inline image artifact；真实带 caption figure 仍按独立 artifact 保留
 - `Building AI Coding Agents for the Terminal...` 现在会被判为 `layout_risk=medium` 并成功 bootstrap，且已从 `Chapter 1 + References + Appendix` 进一步提升到 `Chapter 1 + References + Appendix A + Appendix K + Appendix K.3 + Appendix K.4`
 - `LLMs in Production` 现在会被判为 `layout_risk=low` 并成功 bootstrap，结构已恢复到 `Front Matter + 12 body chapters + Appendix A/B/C + Index + Back Matter`
-- `LLMs in Production` 的 title cleanup 已明显改善，但仍残留 `Adeep / Dataislikegarbage / canyougo` 这类更深层的 extractor 断词噪声
+- `LLMs in Production` 的 chapter-intro title 噪声已进一步压下去，但正文更深层 extractor 断词仍未系统治理
 - 常用目录候选扫描已正式工具化；截至当前，本机可直接进入 pass-path 的真实长书仍只有 `AI Agents in Action` 和 `LLMs in Production`
 - 扫描 PDF、OCR、academic paper 的 table/equation-aware 双栏阅读顺序、复杂图表/公式保护仍未开始
 
@@ -149,10 +150,10 @@ Last Updated: 2026-03-20
 ## Next
 
 1. 扩第三篇真实英文论文或更异质样本，验证 paper-title / broken-references 恢复不是双样本过拟合
-2. 继续 harden chapter-intro title cleanup，专门处理 `Adeep / Dataislikegarbage / canyougo` 这类更深层断词噪声
-3. 决定 nested appendix evidence 何时升级成正式 section tree，而不是一直停留在观测态
-4. 评估 `Back Matter` 是否要接受更弱的 cue，还是继续停留在 explicit-cue policy
-5. academic paper 的 table/figure/equation-aware 双栏阅读顺序继续 harden，目标从“clean heading 残差”推进到更稳的 figure/equation around-order
+2. 决定 nested appendix evidence 何时升级成正式 section tree，而不是一直停留在观测态
+3. 评估 `Back Matter` 是否要接受更弱的 cue，还是继续停留在 explicit-cue policy
+4. academic paper 的 table/figure/equation-aware 双栏阅读顺序继续 harden，目标从“clean heading 残差”推进到更稳的 figure/equation around-order
+5. medium-risk PDF 的更细粒度放行策略，而不是继续停留在“大而化之的 medium-risk 可进链路”
 
 ## Verification Baseline
 

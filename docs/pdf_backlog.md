@@ -87,7 +87,7 @@ Last Updated: 2026-03-20
 - [x] code continuity hardening 第一刀：comment-only code body promotion + `code -> inline image -> code` 误切桥接
 - [x] backmatter cue hardening：`appendix -> tail body` 在 explicit cue 下可升级为 `backmatter`
 - [ ] nested appendix section-tree upgrade：决定 `K.2.5` 这类嵌套小节何时从 evidence 升级为正式 section tree
-- [ ] chapter-intro title cleanup v2：继续清理 `Adeep / Dataislikegarbage / canyougo` 这类更深层断词噪声
+- [x] chapter-intro title cleanup v2：继续清理 `Adeep / Dataislikegarbage / canyougo` 这类更深层断词噪声
 - [ ] 更复杂的 paragraph reconstruction：quote / list / inset text 边界更稳
 - [x] academic paper section recovery v1：让 short paper 不止恢复 `body + references`，而是补出第一刀 inline section heading tree
 - [x] academic paper heading cleanup v2：清理 `3 Model Ar`、`Embeddings and Softmax Similarly`、`Encoder:` 尾巴和表格前误切 heading
@@ -118,9 +118,9 @@ Last Updated: 2026-03-20
 
 1. 第三篇真实英文论文或更异质 paper 扩样
 2. nested appendix section-tree upgrade
-3. chapter-intro title cleanup v2
-4. backmatter cue hardening v2
-5. medium-risk PDF 的更细粒度放行策略
+3. backmatter cue hardening v2
+4. medium-risk PDF 的更细粒度放行策略
+5. 更复杂的 paragraph reconstruction
 
 ## Current Working Set
 
@@ -128,4 +128,11 @@ Last Updated: 2026-03-20
 
 1. 第三篇真实英文论文或更异质 paper 扩样
 2. nested appendix section-tree upgrade
-3. chapter-intro title cleanup v2
+3. medium-risk PDF 的更细粒度放行策略
+
+## Latest Slice
+
+- `chapter-intro title cleanup v2` 已完成：
+  - 保留合法 article/question spacing，避免 `A deep` / `you go` 被误粘
+  - 当 intro title 后紧跟 uppercase spaced-letter epigraph / quote restart 时，直接在 parser 截断
+  - 新增 single-block `title + epigraph` 回归，覆盖 `LLMs in Production` 的真实失败形态
