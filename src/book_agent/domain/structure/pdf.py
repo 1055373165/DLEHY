@@ -207,6 +207,8 @@ _PROSE_CONTINUATION_STOPWORDS = {
     "you",
     "your",
 }
+_BOOK_INLINE_HEADING_MAX_WORDS = 10
+_CONTEXTUAL_IMAGE_LEGEND_START_WORDS = {"this", "these", "the"}
 _TITLE_OCTAL_ESCAPE_PATTERN = re.compile(r"\\\d{3}")
 _TITLE_SINGLE_LETTER_SEQUENCE_PATTERN = re.compile(r"\b(?:[A-Za-z]\s+){2,}[A-Za-z]\b")
 _APPENDIX_SHORT_LABEL_LEAD_PATTERN = re.compile(r"^[A-Z](?:[).:\-])?\s+[A-Z]")
@@ -1744,6 +1746,17 @@ def _looks_like_code_docstring_text(text: str) -> bool:
     return quote_lines >= 2 and prose_lines >= 3
 
 
+def _looks_like_code_comment_text(text: str) -> bool:
+    normalized_lines = _expanded_code_candidate_lines(text)
+    if len(normalized_lines) < 2:
+        return False
+    comment_lines = sum(1 for line in normalized_lines if line.startswith("#"))
+    if comment_lines < max(2, len(normalized_lines) - 1):
+        return False
+    alpha_tokens = sum(len(re.findall(r"[A-Za-z_][A-Za-z0-9_'-]*", line)) for line in normalized_lines)
+    return alpha_tokens >= max(4, len(normalized_lines) * 2)
+
+
 def _looks_like_table(line_count: int, lines: list[str]) -> bool:
     nonempty_lines = [line.rstrip("\n") for line in lines if _normalize_text(line)]
     if not nonempty_lines:
@@ -1938,6 +1951,57 @@ def _looks_like_prose_continuation_fragment(text: str) -> bool:
     if not continuation_lead:
         return False
     return stopword_hits >= max(4, len(tokens) // 8) and (sentence_punctuation >= 1 or len(normalized_lines) >= 3)
+
+
+def _looks_like_book_prose_fragment(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized or len(normalized) < 24:
+        return False
+    if _looks_like_caption_text(normalized) or _looks_like_visual_heading(normalized, 1):
+        return False
+    if _looks_like_code(normalized, 1):
+        return False
+    if _looks_like_table(1, [normalized]):
+        return False
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", normalized.casefold())
+    if len(tokens) < 6:
+        return False
+    stopword_hits = sum(1 for token in tokens if token in _PROSE_CONTINUATION_STOPWORDS)
+    return stopword_hits >= max(3, len(tokens) // 4)
+
+
+def _looks_like_inline_book_heading_text(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized or len(normalized) > 96:
+        return False
+    if _looks_like_caption_text(normalized) or _HEADING_PATTERN.match(normalized):
+        return False
+    if _looks_like_code(normalized, 1):
+        return False
+    if _looks_like_table(1, [normalized]):
+        return False
+    token_count = len(re.findall(r"[A-Za-z][A-Za-z'-]*", normalized))
+    if not 2 <= token_count <= _BOOK_INLINE_HEADING_MAX_WORDS:
+        return False
+    return _looks_like_visual_heading(normalized, 1)
+
+
+def _looks_like_contextual_image_legend_text(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized or len(normalized) > 96:
+        return False
+    if _looks_like_caption_text(normalized) or _looks_like_visual_heading(normalized, 1):
+        return False
+    if _looks_like_code(normalized, 1):
+        return False
+    if _looks_like_table(1, [normalized]):
+        return False
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", normalized.casefold())
+    if not 3 <= len(tokens) <= 9:
+        return False
+    if tokens[0] not in _CONTEXTUAL_IMAGE_LEGEND_START_WORDS:
+        return False
+    return any(char.isdigit() for char in normalized)
 
 
 def _page_has_multi_column_signature(page: "PdfPage") -> bool:
@@ -3060,6 +3124,8 @@ class PdfStructureRecoveryService:
             profile,
         )
         self._link_footnotes(recovered_blocks)
+        recovered_blocks = self._promote_inline_book_heading_blocks(recovered_blocks)
+        recovered_blocks = self._promote_contextual_image_legend_blocks(recovered_blocks, ordered_pages)
         recovered_blocks = self._recover_embedded_page_heading_blocks(recovered_blocks)
         recovered_blocks = self._recover_document_title_heading_blocks(recovered_blocks, extraction.title)
         recovered_blocks = self._recover_academic_section_blocks(recovered_blocks, profile)
@@ -3286,54 +3352,54 @@ class PdfStructureRecoveryService:
         for page in pages:
             font_sizes = [block.font_size_avg for block in page.blocks if block.font_size_avg > 0]
             page_font_median = median(font_sizes) if font_sizes else 12.0
-            ordered_blocks = self._ordered_page_blocks(page, profile)
             page_context = page_contexts.get(page.page_number, _PageRecoveryContext(is_toc_page=False))
-
-            for raw_block in ordered_blocks:
-                role = self._classify_role(
-                    page=page,
-                    raw_block=raw_block,
-                    page_font_median=page_font_median,
-                    repeated_edge_text=repeated_edge_text,
-                    outline_titles=outline_by_page.get(page.page_number, []),
-                    page_context=page_context,
-                )
+            for entry_kind, raw_entry in self._ordered_page_content_entries(page, profile):
                 reading_order_index += 1
-                metadata, flags = self._metadata_for_block(role, raw_block.text, page_context)
-                recovered_block = _RecoveredBlock(
-                    role=role,
-                    block_type=self._block_type_for_role(role),
-                    text=self._normalized_block_text(
-                        raw_block.text,
-                        role=role,
-                        page_number=page.page_number,
+                if entry_kind == "text":
+                    raw_block = raw_entry
+                    role = self._classify_role(
+                        page=page,
+                        raw_block=raw_block,
+                        page_font_median=page_font_median,
+                        repeated_edge_text=repeated_edge_text,
+                        outline_titles=outline_by_page.get(page.page_number, []),
                         page_context=page_context,
-                    ),
-                    page_start=page.page_number,
-                    page_end=page.page_number,
-                    bbox_regions=[
-                        {
-                            "page_number": page.page_number,
-                            "bbox": _bbox_to_json(raw_block.bbox),
-                        }
-                    ],
-                    reading_order_index=reading_order_index,
-                    parse_confidence=self._parse_confidence_for_role(role, profile.layout_risk),
-                    flags=flags,
-                    metadata=metadata,
-                    font_size_avg=raw_block.font_size_avg,
-                    source_path=f"pdf://page/{page.page_number}",
-                    anchor=f"p{page.page_number}-b{reading_order_index}",
-                )
+                    )
+                    metadata, flags = self._metadata_for_block(role, raw_block.text, page_context)
+                    recovered_block = _RecoveredBlock(
+                        role=role,
+                        block_type=self._block_type_for_role(role),
+                        text=self._normalized_block_text(
+                            raw_block.text,
+                            role=role,
+                            page_number=page.page_number,
+                            page_context=page_context,
+                        ),
+                        page_start=page.page_number,
+                        page_end=page.page_number,
+                        bbox_regions=[
+                            {
+                                "page_number": page.page_number,
+                                "bbox": _bbox_to_json(raw_block.bbox),
+                            }
+                        ],
+                        reading_order_index=reading_order_index,
+                        parse_confidence=self._parse_confidence_for_role(role, profile.layout_risk),
+                        flags=flags,
+                        metadata=metadata,
+                        font_size_avg=raw_block.font_size_avg,
+                        source_path=f"pdf://page/{page.page_number}",
+                        anchor=f"p{page.page_number}-b{reading_order_index}",
+                    )
 
-                merge_index = self._merge_target_index(recovered, recovered_block, pages)
-                if merge_index is not None:
-                    recovered[merge_index] = self._merge_blocks(recovered[merge_index], recovered_block)
-                else:
-                    recovered.append(recovered_block)
+                    merge_index = self._merge_target_index(recovered, recovered_block, pages)
+                    if merge_index is not None:
+                        recovered[merge_index] = self._merge_blocks(recovered[merge_index], recovered_block)
+                    else:
+                        recovered.append(recovered_block)
+                    continue
 
-            for raw_image in self._ordered_page_image_blocks(page):
-                reading_order_index += 1
+                raw_image = raw_entry
                 metadata, flags = self._metadata_for_block("image", "[Image]", page_context)
                 metadata.update(
                     {
@@ -3367,6 +3433,33 @@ class PdfStructureRecoveryService:
                 )
 
         return self._merge_footnote_continuations(recovered, pages)
+
+    def _ordered_page_content_entries(
+        self,
+        page: PdfPage,
+        profile: PdfFileProfile,
+    ) -> list[tuple[str, PdfTextBlock | PdfImageBlock]]:
+        ordered_text_blocks = self._ordered_page_blocks(page, profile)
+        ordered_image_blocks = self._ordered_page_image_blocks(page)
+        if profile.recovery_lane == "academic_paper":
+            return [
+                *[("text", block) for block in ordered_text_blocks],
+                *[("image", block) for block in ordered_image_blocks],
+            ]
+
+        combined_entries: list[tuple[str, PdfTextBlock | PdfImageBlock]] = [
+            *[("text", block) for block in ordered_text_blocks],
+            *[("image", block) for block in ordered_image_blocks],
+        ]
+        combined_entries.sort(
+            key=lambda item: (
+                round(item[1].bbox[1], 2),
+                round(item[1].bbox[0], 2),
+                0 if item[0] == "image" else 1,
+                getattr(item[1], "block_number", 0),
+            )
+        )
+        return combined_entries
 
     def _ordered_page_image_blocks(self, page: PdfPage) -> list[PdfImageBlock]:
         return sorted(page.image_blocks, key=lambda block: (round(block.bbox[1], 2), round(block.bbox[0], 2)))
@@ -3927,7 +4020,12 @@ class PdfStructureRecoveryService:
             return False
         if current.page_start - previous.page_end > 1:
             return False
+        page_lookup = {page.page_number: page for page in pages}
         if current.page_start == previous.page_end:
+            if self._should_keep_inline_book_heading_separate(previous, current):
+                return False
+            if self._looks_like_contextual_image_legend_block(previous, page_lookup):
+                return False
             prev_bottom = previous.bbox_regions[-1]["bbox"][3]
             curr_top = current.bbox_regions[0]["bbox"][1]
             gap = curr_top - prev_bottom
@@ -3936,8 +4034,6 @@ class PdfStructureRecoveryService:
                     _TERMINAL_PUNCTUATION
                 )
             return False
-
-        page_lookup = {page.page_number: page for page in pages}
         prev_page = page_lookup.get(previous.page_end)
         curr_page = page_lookup.get(current.page_start)
         if prev_page is None or curr_page is None:
@@ -3953,6 +4049,68 @@ class PdfStructureRecoveryService:
         if previous.text.rstrip().endswith(_TERMINAL_PUNCTUATION):
             return False
         return current.text[:1].islower()
+
+    def _should_keep_inline_book_heading_separate(
+        self,
+        previous: _RecoveredBlock,
+        current: _RecoveredBlock,
+    ) -> bool:
+        if previous.page_start != current.page_start or previous.page_end != current.page_end:
+            return False
+        if previous.page_start != previous.page_end:
+            return False
+        if str(previous.metadata.get("pdf_page_family") or "body") != "body":
+            return False
+        if str(current.metadata.get("pdf_page_family") or "body") != "body":
+            return False
+        if not _looks_like_inline_book_heading_text(previous.text):
+            return False
+        if not _looks_like_book_prose_fragment(current.text):
+            return False
+        if previous.font_size_avg < max(current.font_size_avg * 1.08, current.font_size_avg + 0.6):
+            return False
+        previous_bbox = previous.bbox_regions[-1]["bbox"]
+        current_bbox = current.bbox_regions[0]["bbox"]
+        gap = float(current_bbox[1]) - float(previous_bbox[3])
+        if gap > max(previous.font_size_avg * 2.6, 32.0):
+            return False
+        return abs(float(previous_bbox[0]) - float(current_bbox[0])) <= 72.0
+
+    def _looks_like_contextual_image_legend_block(
+        self,
+        block: _RecoveredBlock,
+        page_lookup: dict[int, PdfPage],
+    ) -> bool:
+        if block.role != "body" or block.block_type != BlockType.PARAGRAPH:
+            return False
+        if block.page_start != block.page_end:
+            return False
+        if str(block.metadata.get("pdf_page_family") or "body") != "body":
+            return False
+        if not _looks_like_contextual_image_legend_text(block.text):
+            return False
+        page = page_lookup.get(block.page_start)
+        if page is None:
+            return False
+        block_bbox = self._page_bbox(block, block.page_start)
+        if block_bbox is None:
+            return False
+        block_width = max(block_bbox[2] - block_bbox[0], 1.0)
+        block_center = (block_bbox[0] + block_bbox[2]) / 2.0
+        if block_width > page.width * 0.58:
+            return False
+        if abs(block_center - (page.width / 2.0)) > page.width * 0.2:
+            return False
+
+        for image in page.image_blocks:
+            image_bbox = [float(value) for value in image.bbox]
+            if self._horizontal_overlap_ratio(block_bbox, image_bbox) < 0.25:
+                continue
+            below_gap = block_bbox[1] - image_bbox[3]
+            above_gap = image_bbox[1] - block_bbox[3]
+            if -8.0 <= below_gap <= 48.0 or -8.0 <= above_gap <= 32.0:
+                return True
+        return False
 
     def _merge_target_index(
         self,
@@ -4217,7 +4375,7 @@ class PdfStructureRecoveryService:
             return False
         if _looks_like_code("\n".join(normalized_lines), max(2, len(normalized_lines))):
             return True
-        if not _looks_like_code_docstring_text(block.text):
+        if not (_looks_like_code_docstring_text(block.text) or _looks_like_code_comment_text(block.text)):
             return False
 
         for offset in range(1, 4):
@@ -4548,6 +4706,81 @@ class PdfStructureRecoveryService:
                 segment.reading_order_index = reading_order_index
                 split_blocks.append(segment)
         return split_blocks
+
+    def _promote_inline_book_heading_blocks(
+        self,
+        recovered_blocks: list[_RecoveredBlock],
+    ) -> list[_RecoveredBlock]:
+        promoted: list[_RecoveredBlock] = []
+        for index, block in enumerate(recovered_blocks):
+            if not self._should_promote_inline_book_heading_block(recovered_blocks, index):
+                promoted.append(block)
+                continue
+            metadata = dict(block.metadata)
+            metadata["pdf_heading_recovery_source"] = "inline_book_heading"
+            promoted_block = replace(
+                block,
+                role="heading",
+                block_type=BlockType.HEADING,
+                metadata=metadata,
+            )
+            promoted_block.flags = list(dict.fromkeys([*block.flags, "inline_book_heading_promoted"]))
+            promoted.append(promoted_block)
+        return promoted
+
+    def _should_promote_inline_book_heading_block(
+        self,
+        recovered_blocks: list[_RecoveredBlock],
+        index: int,
+    ) -> bool:
+        block = recovered_blocks[index]
+        if block.role != "body" or block.block_type != BlockType.PARAGRAPH:
+            return False
+        if str(block.metadata.get("pdf_page_family") or "body") != "body":
+            return False
+        next_body = self._next_book_body_candidate(recovered_blocks, index)
+        if next_body is None:
+            return False
+        return self._should_keep_inline_book_heading_separate(block, next_body)
+
+    def _next_book_body_candidate(
+        self,
+        recovered_blocks: list[_RecoveredBlock],
+        index: int,
+    ) -> _RecoveredBlock | None:
+        block = recovered_blocks[index]
+        for candidate in recovered_blocks[index + 1 : index + 5]:
+            if candidate.page_start - block.page_end > 1:
+                break
+            if candidate.role in {"header", "footer", "toc_entry", "image", "caption", "footnote"}:
+                continue
+            if candidate.role == "body" and candidate.block_type == BlockType.PARAGRAPH:
+                return candidate
+            break
+        return None
+
+    def _promote_contextual_image_legend_blocks(
+        self,
+        recovered_blocks: list[_RecoveredBlock],
+        pages: list[PdfPage],
+    ) -> list[_RecoveredBlock]:
+        page_lookup = {page.page_number: page for page in pages}
+        promoted: list[_RecoveredBlock] = []
+        for block in recovered_blocks:
+            if not self._looks_like_contextual_image_legend_block(block, page_lookup):
+                promoted.append(block)
+                continue
+            metadata = dict(block.metadata)
+            metadata["pdf_contextual_image_legend"] = True
+            promoted_block = replace(
+                block,
+                role="caption",
+                block_type=BlockType.CAPTION,
+                metadata=metadata,
+            )
+            promoted_block.flags = list(dict.fromkeys([*block.flags, "contextual_image_legend_promoted"]))
+            promoted.append(promoted_block)
+        return promoted
 
     def _split_embedded_page_heading_segments(
         self,
@@ -4959,7 +5192,8 @@ class PdfStructureRecoveryService:
                 continue
             if candidate.page_start != artifact_block.page_start or candidate.page_end != artifact_block.page_end:
                 continue
-            if not _caption_matches_artifact_role(candidate.text, self._normalized_artifact_caption_role(artifact_block)):
+            artifact_role = self._normalized_artifact_caption_role(artifact_block)
+            if not self._caption_candidate_matches_artifact_role(candidate, artifact_role):
                 continue
             candidate_bbox = self._page_bbox(candidate, artifact_block.page_start)
             if candidate_bbox is None:
@@ -4997,6 +5231,15 @@ class PdfStructureRecoveryService:
         if above_candidates:
             return min(above_candidates)[3]
         return None
+
+    def _caption_candidate_matches_artifact_role(
+        self,
+        candidate: _RecoveredBlock,
+        artifact_role: str,
+    ) -> bool:
+        if _caption_matches_artifact_role(candidate.text, artifact_role):
+            return True
+        return artifact_role == "image" and bool(candidate.metadata.get("pdf_contextual_image_legend"))
 
     def _artifact_group_context_target(
         self,

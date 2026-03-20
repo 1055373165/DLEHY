@@ -1,6 +1,6 @@
 # PDF Status
 
-Last Updated: 2026-03-16
+Last Updated: 2026-03-20
 
 ## Purpose
 
@@ -88,6 +88,10 @@ Last Updated: 2026-03-16
 - 已完成 `bilingual_html` block render contract 升级：不再绕过 block-level render mode，`source-only` / protected artifact / reference-preserve 与 merged/review 出口保持一致
 - 已完成 `pdf_preserve_evidence`：review package / bilingual manifest 现在会显式导出 special-section page contract、render mode、notice 和 source-only 证据
 - 已完成 `pdf_page_debug_evidence`：review package 现在会导出 chapter-sliced page/block debug 证据，直接标出 special-section / preserve-contract / layout-suspect 页及其 block render mode
+- 已完成 PDF image-caption export 修复：`image_anchor` 现在在最终 HTML/Markdown 中稳定保持“图片在上，caption 在下”，不再把译后 caption 锚到图片上方
+- 已完成 PDF image materialization refresh v2：导出时会优先用新裁出的 PDF crop 覆盖旧持久化图片，并按目标像素尺寸重渲染，避免历史低清 crop 持续污染 merged HTML
+- 已完成 recoverable table semantic export 第一刀：可稳定恢复结构的表格现在导出为语义化 HTML `<table>`，而不是一律退化成 monospace 文本块
+- 已完成 code continuity hardening 第一刀：comment-only body 若紧邻代码块会在 parser 侧提升为 code，export 侧也会桥接 `code -> 无 caption inline image -> code` 的误插入模式，避免完整代码块被无关图片切断
 - 已完成 medium-risk appendix finer-grained recovery 第一刀：`Building AI Coding Agents...` 现在已从单一 `Appendix` 提升到 `Appendix A Complete Tool Catalog + Appendix K Full System Prompt Templates`
 - 已完成 appendix-intro false-positive guard：长正文中仅因晚出现的 `later in this appendix` 一类 cue，不再误生成新的 appendix 子章节标题
 - 已完成 special-section subheading hardening 第一刀：appendix continuation 页上的顶层子标题（如 `K.3` / `K.4`）现在可切出新的 appendix 子章节，而 `K.2.5` 这类嵌套小节仍保持保守忽略
@@ -121,6 +125,8 @@ Last Updated: 2026-03-16
 - `Back Matter` 目前只在已验证的 `index -> tail body` 路径上升级成正式 family + source-only；更广的 backmatter cue 还未推广
 - `appendix -> backmatter` 当前只覆盖显式 heading-title 或强 marketing-signals 的尾页；普通 appendix 续页不会仅因靠近文末而自动升级
 - `pdf_preserve_evidence` 当前已能让 operator 直接看到 special-section 的 preserve contract，但还没细到 block 原文级 forensics
+- recoverable table semantic export 当前只覆盖行列边界较稳定、可从 artifact/source 文本重建的简单表格；复杂 merged-cell、跨页或强视觉布局表格仍会保守走 preserve/fallback
+- code continuity repair 当前只桥接“无 caption、疑似误插入、位于两段 code 之间”的 inline image artifact；真实带 caption figure 仍按独立 artifact 保留
 - `Building AI Coding Agents for the Terminal...` 现在会被判为 `layout_risk=medium` 并成功 bootstrap，且已从 `Chapter 1 + References + Appendix` 进一步提升到 `Chapter 1 + References + Appendix A + Appendix K + Appendix K.3 + Appendix K.4`
 - `LLMs in Production` 现在会被判为 `layout_risk=low` 并成功 bootstrap，结构已恢复到 `Front Matter + 12 body chapters + Appendix A/B/C + Index + Back Matter`
 - `LLMs in Production` 的 title cleanup 已明显改善，但仍残留 `Adeep / Dataislikegarbage / canyougo` 这类更深层的 extractor 断词噪声

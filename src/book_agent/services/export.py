@@ -36,6 +36,7 @@ from book_agent.orchestrator.rule_engine import IssueRoutingContext, resolve_act
 
 _SPECIAL_PDF_PAGE_FAMILIES = {"frontmatter", "appendix", "references", "index", "backmatter", "toc"}
 _TERMINAL_PUNCTUATION = (".", "!", "?", ":", ";", "\"", "'", "\u201d", "\u2019")
+_PDF_IMAGE_MATERIALIZATION_VERSION = 2
 
 
 @dataclass(slots=True, frozen=True)
@@ -1820,11 +1821,18 @@ class ExportService:
             ".artifact .artifact-note{font-size:12px;font-family:var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}"
             ".artifact pre{margin:0;white-space:pre;overflow-x:auto;tab-size:4;font-family:'SFMono-Regular',Menlo,Monaco,monospace;font-size:14px;line-height:1.68;color:#102033;background:#eef3fa;border-radius:12px;padding:14px;}"
             ".artifact .artifact-body{white-space:pre-wrap;font-family:'SFMono-Regular',Menlo,Monaco,monospace;font-size:14px;line-height:1.68;color:#102033;background:#f5f8fc;border-radius:12px;padding:14px;}"
+            ".artifact .artifact-table-body{background:transparent;padding:0;white-space:normal;font-family:var(--font-ui);}"
             ".artifact.image-anchor .artifact-body,.artifact.reference .artifact-body{font-family:var(--font-ui);}"
             ".artifact.image-anchor .artifact-body div{margin:4px 0;}"
             ".artifact-figure{margin:0;display:grid;gap:12px;}"
             ".artifact-image{display:block;max-width:100%;height:auto;border-radius:14px;border:1px solid rgba(184,197,218,.9);background:#fff;box-shadow:0 12px 28px rgba(60,74,97,.08);}"
             ".artifact-figure figcaption{font-family:var(--font-ui);font-size:14px;line-height:1.6;color:var(--muted);}"
+            ".artifact-source-caption{margin-top:12px;font-family:var(--font-ui);font-size:14px;line-height:1.6;color:var(--muted);}"
+            ".artifact-table-shell{overflow-x:auto;border:1px solid rgba(184,197,218,.72);border-radius:14px;background:#fff;}"
+            ".artifact-table{width:100%;border-collapse:collapse;font-family:var(--font-ui);font-size:14px;line-height:1.55;color:#102033;background:#fff;}"
+            ".artifact-table thead th{background:#edf4fb;font-weight:700;color:#17313a;}"
+            ".artifact-table th,.artifact-table td{padding:10px 12px;border:1px solid rgba(184,197,218,.72);text-align:left;vertical-align:top;white-space:nowrap;}"
+            ".artifact-table tbody tr:nth-child(even){background:#f8fbfe;}"
             ".artifact.reference .artifact-body{word-break:break-all;}"
             ".quote{border-left:5px solid #8cc4ce;padding-left:18px;margin-left:4px;}"
             ".footnote .zh,.caption .zh{font-size:16px;color:#334155;}"
@@ -1951,7 +1959,8 @@ class ExportService:
                 parts = [self._markdown_blockquote(notice)] if notice else []
                 parts.append(f"![{image_alt_text}]({asset_src})")
                 if source_text and source_text not in {"[Image]", ""}:
-                    parts.append(f"*{re.sub(r'\\s+', ' ', source_text).strip()}*")
+                    normalized_source_caption = re.sub(r"\s+", " ", source_text).strip()
+                    parts.append(f"*{normalized_source_caption}*")
                 return "\n\n".join(part for part in parts if part)
             artifact_text = source_text
             if block.artifact_kind == "code":
@@ -1969,8 +1978,14 @@ class ExportService:
             parts = [target_text] if target_text else []
             if notice:
                 parts.append(self._markdown_blockquote(notice))
+            markdown_table = (
+                self._markdown_table_from_source_text(source_text)
+                if block.artifact_kind == "table"
+                else None
+            )
             parts.append(
-                self._markdown_fenced_block(
+                markdown_table
+                or self._markdown_fenced_block(
                     source_text,
                     language=self._markdown_language_for_artifact(block.artifact_kind, source_text),
                 )
@@ -1978,15 +1993,18 @@ class ExportService:
             return "\n\n".join(part for part in parts if part)
 
         if block.render_mode == "image_anchor_with_translated_caption":
-            parts = [target_text] if target_text else []
-            if notice:
-                parts.append(self._markdown_blockquote(notice))
+            parts: list[str] = []
             if asset_src:
                 parts.append(f"![{image_alt_text}]({asset_src})")
             elif source_text:
                 parts.append(self._markdown_blockquote(source_text, label="Image caption"))
+            if target_text:
+                parts.append(target_text)
+            if notice:
+                parts.append(self._markdown_blockquote(notice))
             if source_text and source_text != target_text:
-                parts.append(f"*Source caption: {re.sub(r'\\s+', ' ', source_text).strip()}*")
+                normalized_source_caption = re.sub(r"\s+", " ", source_text).strip()
+                parts.append(f"*Source caption: {normalized_source_caption}*")
             return "\n\n".join(part for part in parts if part)
 
         if block.render_mode == "reference_preserve_with_translated_label":
@@ -2038,6 +2056,70 @@ class ExportService:
             fence += "`"
         opener = f"{fence}{language}" if language else fence
         return f"{opener}\n{content}\n{fence}"
+
+    def _markdown_table_from_source_text(self, text: str) -> str | None:
+        parsed_rows = self._parse_structured_table_rows(text)
+        if parsed_rows is None:
+            return None
+        header, body_rows = parsed_rows
+        escaped_header = [cell.replace("|", "\\|") for cell in header]
+        lines = [
+            f"| {' | '.join(escaped_header)} |",
+            f"| {' | '.join(['---'] * len(escaped_header))} |",
+        ]
+        for row in body_rows:
+            escaped_row = [cell.replace("|", "\\|") for cell in row]
+            lines.append(f"| {' | '.join(escaped_row)} |")
+        return "\n".join(lines)
+
+    def _parse_structured_table_rows(self, text: str) -> tuple[list[str], list[list[str]]] | None:
+        lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None
+
+        rows = [self._split_table_candidate_line(line) for line in lines]
+        if any(row is None for row in rows):
+            return None
+        normalized_rows = [row for row in rows if row]
+        if len(normalized_rows) < 2:
+            return None
+
+        separator_index = 1 if len(normalized_rows) >= 3 and self._is_table_separator_row(normalized_rows[1]) else None
+        if separator_index is not None:
+            normalized_rows.pop(separator_index)
+        if len(normalized_rows) < 2:
+            return None
+
+        column_count = len(normalized_rows[0])
+        if column_count < 2 or column_count > 8:
+            return None
+        if any(len(row) != column_count for row in normalized_rows):
+            return None
+
+        header = normalized_rows[0]
+        body_rows = normalized_rows[1:]
+        if not body_rows:
+            return None
+        return header, body_rows
+
+    def _split_table_candidate_line(self, line: str) -> list[str] | None:
+        stripped = line.strip().strip("|").strip()
+        if not stripped:
+            return None
+        if "|" in stripped:
+            cells = [cell.strip() for cell in stripped.split("|")]
+            cells = [cell for cell in cells if cell]
+            if len(cells) >= 2:
+                return cells
+        cells = [cell.strip() for cell in re.split(r"\t+|\s{2,}", stripped) if cell.strip()]
+        if len(cells) >= 2:
+            return cells
+        return None
+
+    def _is_table_separator_row(self, row: list[str]) -> bool:
+        if not row:
+            return False
+        return all(bool(re.fullmatch(r":?-{2,}:?", cell.strip())) for cell in row)
 
     def _markdown_language_for_artifact(self, artifact_kind: str | None, text: str) -> str:
         if artifact_kind == "equation":
@@ -2810,18 +2892,36 @@ class ExportService:
         bundle: ChapterExportBundle,
         render_blocks: list[MergedRenderBlock],
     ) -> list[MergedRenderBlock]:
-        normalized: list[MergedRenderBlock] = []
+        repaired_blocks: list[MergedRenderBlock] = []
         for index, block in enumerate(render_blocks):
             repaired_block = self._repair_book_pdf_render_block(bundle, index, block)
-            if repaired_block is None:
+            if repaired_block is not None:
+                repaired_blocks.append(repaired_block)
+
+        normalized: list[MergedRenderBlock] = []
+        index = 0
+        while index < len(repaired_blocks):
+            current = repaired_blocks[index]
+            if index + 2 < len(repaired_blocks) and self._should_bridge_code_blocks_across_inline_artifact(
+                current,
+                repaired_blocks[index + 1],
+                repaired_blocks[index + 2],
+            ):
+                current = self._merge_code_blocks_across_inline_artifact(
+                    current,
+                    repaired_blocks[index + 1],
+                    repaired_blocks[index + 2],
+                )
+                index += 3
+            else:
+                index += 1
+            if normalized and self._should_merge_adjacent_code_blocks(normalized[-1], current):
+                normalized[-1] = self._merge_adjacent_code_render_blocks(normalized[-1], current)
                 continue
-            if normalized and self._should_merge_adjacent_code_blocks(normalized[-1], repaired_block):
-                normalized[-1] = self._merge_adjacent_code_render_blocks(normalized[-1], repaired_block)
+            if normalized and self._should_merge_adjacent_book_paragraph_fragments(normalized[-1], current):
+                normalized[-1] = self._merge_adjacent_book_paragraph_fragments(normalized[-1], current)
                 continue
-            if normalized and self._should_merge_adjacent_book_paragraph_fragments(normalized[-1], repaired_block):
-                normalized[-1] = self._merge_adjacent_book_paragraph_fragments(normalized[-1], repaired_block)
-                continue
-            normalized.append(repaired_block)
+            normalized.append(current)
         return normalized
 
     def _repair_book_pdf_render_block(
@@ -3349,6 +3449,95 @@ class ExportService:
             return False
         return True
 
+    def _should_bridge_code_blocks_across_inline_artifact(
+        self,
+        previous: MergedRenderBlock,
+        middle: MergedRenderBlock,
+        following: MergedRenderBlock,
+    ) -> bool:
+        if not self._should_merge_adjacent_code_blocks(previous, following):
+            return False
+        if middle.chapter_id != previous.chapter_id or middle.chapter_id != following.chapter_id:
+            return False
+        if middle.artifact_kind not in {"image", "figure"}:
+            return False
+        if middle.render_mode not in {"image_anchor_with_translated_caption", "source_artifact_full_width"}:
+            return False
+        if str(middle.source_metadata.get("linked_caption_block_id") or "").strip():
+            return False
+        if str(middle.source_metadata.get("linked_caption_text") or "").strip():
+            return False
+        if (middle.target_text or "").strip():
+            return False
+        previous_bbox = self._block_bbox_regions(previous)
+        middle_bbox = self._block_bbox_regions(middle)
+        following_bbox = self._block_bbox_regions(following)
+        if not previous_bbox or not middle_bbox or not following_bbox:
+            return False
+        previous_last_bbox = previous_bbox[-1].get("bbox")
+        middle_first_bbox = middle_bbox[0].get("bbox")
+        following_first_bbox = following_bbox[0].get("bbox")
+        if not (
+            isinstance(previous_last_bbox, list)
+            and isinstance(middle_first_bbox, list)
+            and isinstance(following_first_bbox, list)
+        ):
+            return False
+        try:
+            previous_gap = float(middle_first_bbox[1]) - float(previous_last_bbox[3])
+            following_gap = float(following_first_bbox[1]) - float(middle_first_bbox[3])
+            code_width = max(
+                float(previous_last_bbox[2]) - float(previous_last_bbox[0]),
+                float(following_first_bbox[2]) - float(following_first_bbox[0]),
+                1.0,
+            )
+            middle_width = float(middle_first_bbox[2]) - float(middle_first_bbox[0])
+            middle_height = float(middle_first_bbox[3]) - float(middle_first_bbox[1])
+            code_left_delta = abs(float(previous_last_bbox[0]) - float(following_first_bbox[0]))
+        except (TypeError, ValueError, IndexError):
+            return False
+        if previous_gap < -12.0 or following_gap < -12.0:
+            return False
+        if previous_gap > 48.0 or following_gap > 48.0:
+            return False
+        if code_left_delta > 96.0:
+            return False
+        if middle_width > code_width * 0.58 and middle_height > 96.0:
+            return False
+        if (
+            self._bbox_horizontal_overlap_ratio(middle_first_bbox, previous_last_bbox) < 0.22
+            and self._bbox_horizontal_overlap_ratio(middle_first_bbox, following_first_bbox) < 0.22
+        ):
+            return False
+        return True
+
+    def _merge_code_blocks_across_inline_artifact(
+        self,
+        previous: MergedRenderBlock,
+        middle: MergedRenderBlock,
+        following: MergedRenderBlock,
+    ) -> MergedRenderBlock:
+        merged = self._merge_adjacent_code_render_blocks(previous, following)
+        merged_metadata = dict(merged.source_metadata)
+        merged_metadata["suppressed_artifact_block_ids"] = list(
+            dict.fromkeys(
+                [
+                    *list(merged_metadata.get("suppressed_artifact_block_ids") or []),
+                    middle.block_id,
+                ]
+            )
+        )
+        merged_metadata["recovery_flags"] = list(
+            dict.fromkeys(
+                [
+                    *list(merged_metadata.get("recovery_flags") or []),
+                    *list(middle.source_metadata.get("recovery_flags") or []),
+                    "export_inline_image_between_code_suppressed",
+                ]
+            )
+        )
+        return replace(merged, source_metadata=merged_metadata)
+
     def _should_merge_adjacent_book_paragraph_fragments(
         self,
         previous: MergedRenderBlock,
@@ -3599,7 +3788,12 @@ class ExportService:
         if block.render_mode == "translated_wrapper_with_preserved_artifact":
             note = f"<div class='artifact-note'>{html.escape(block.notice or '')}</div>" if block.notice else ""
             translated = f"<div class='zh'>{target_html}</div>" if block.target_text else ""
-            body = f"<div class='artifact-body'>{source_html}</div>"
+            table_html = self._render_structured_table_html(block.source_text) if block.artifact_kind == "table" else None
+            body = (
+                f"<div class='artifact-body artifact-table-body'>{table_html}</div>"
+                if table_html is not None
+                else f"<div class='artifact-body'>{source_html}</div>"
+            )
             return (
                 f"<section class='block artifact {html.escape(block.block_type)}'>"
                 f"{translated}{note}{body}</section>"
@@ -3612,11 +3806,11 @@ class ExportService:
                 asset_src = str(asset_path_by_block_id.get(block.block_id) or "")
             image_alt_text = str(block.source_metadata.get("image_alt") or block.source_text or "Embedded image")
             source_caption = source_html if block.source_text else ""
+            footer_source_caption = source_caption
             if asset_src:
                 figure_html = (
                     "<figure class='artifact-figure'>"
                     f"<img class='artifact-image' src='{html.escape(asset_src)}' alt='{html.escape(image_alt_text)}'/>"
-                    f"{f'<figcaption>{source_caption}</figcaption>' if source_caption else ''}"
                     "</figure>"
                 )
                 body = f"<div class='artifact-body'>{figure_html}</div>"
@@ -3628,9 +3822,20 @@ class ExportService:
                 if image_alt_text and image_alt_text != block.source_text:
                     metadata_lines.append(f"<div><strong>Alt:</strong> {html.escape(image_alt_text)}</div>")
                 body = f"<div class='artifact-body'>{''.join(metadata_lines) or source_html}</div>"
+                if not metadata_lines:
+                    footer_source_caption = ""
+            caption_html = "".join(
+                part
+                for part in (
+                    translated,
+                    note,
+                    f"<div class='artifact-source-caption'>{footer_source_caption}</div>" if footer_source_caption else "",
+                )
+                if part
+            )
             return (
                 f"<section class='block artifact image-anchor {html.escape(block.block_type)}'>"
-                f"{translated}{note}{body}</section>"
+                f"{body}{caption_html}</section>"
             )
         if block.render_mode == "reference_preserve_with_translated_label":
             note = f"<div class='artifact-note'>{html.escape(block.notice or '')}</div>" if block.notice else ""
@@ -3671,6 +3876,25 @@ class ExportService:
             normalized = self._reflow_code_artifact_text(normalized)
         return html.escape(normalized)
 
+    def _render_structured_table_html(self, text: str) -> str | None:
+        parsed_rows = self._parse_structured_table_rows(text)
+        if parsed_rows is None:
+            return None
+        header, body_rows = parsed_rows
+        thead = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
+        body = "".join(
+            "<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
+            for row in body_rows
+        )
+        return (
+            "<div class='artifact-table-shell'>"
+            "<table class='artifact-table'>"
+            f"<thead><tr>{thead}</tr></thead>"
+            f"<tbody>{body}</tbody>"
+            "</table>"
+            "</div>"
+        )
+
     def _looks_like_code_artifact_text(self, text: str, *, academic_paper: bool = False) -> bool:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if len(lines) < 2:
@@ -3685,6 +3909,7 @@ class ExportService:
             for line in lines[:24]
             if len(line.split()) >= 6 and re.search(r"[.!?](?:[\"'\)\]\u201d\u2019])?$", line)
         )
+        comment_lines = sum(1 for line in lines[:24] if line.startswith(("#", "//")))
         score = 0
         strong_cues = 0
         for line in lines[:24]:
@@ -3694,6 +3919,8 @@ class ExportService:
                 continue
             if line.startswith(("#", "@")):
                 score += 2
+                if line.startswith("#"):
+                    strong_cues += 1
             if _CODE_ASSIGNMENT_PATTERN.match(line):
                 score += 2
                 strong_cues += 1
@@ -3704,6 +3931,8 @@ class ExportService:
                 token in line for token in ("=", ":", ",")
             ):
                 score += 1
+        if comment_lines >= 2 and strong_cues >= 2:
+            return True
         if prose_sentence_lines >= 2 and strong_cues == 0:
             return False
         if strong_cues == 0 and not any(line[:1] in {" ", "\t"} for line in lines if line.strip()):
@@ -3716,6 +3945,10 @@ class ExportService:
             return False
         if self._looks_like_book_structural_heading_text(normalized):
             return False
+        if re.match(r"^\s*(?:[-*+•]|\d+[.)])\s+", normalized):
+            alpha_tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", normalized)
+            if len(alpha_tokens) >= 4:
+                return False
         if self._looks_like_short_book_prose_line(normalized):
             return False
         if _SINGLE_LINE_CODEISH_PATTERN.search(normalized):
@@ -3886,11 +4119,18 @@ class ExportService:
             ".artifact .artifact-note{font-size:12px;font-family:var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}"
             ".artifact pre{margin:0;white-space:pre;overflow-x:auto;tab-size:4;font-family:'SFMono-Regular',Menlo,Monaco,monospace;font-size:14px;line-height:1.68;color:#102033;background:#eef3fa;border-radius:12px;padding:14px;}"
             ".artifact .artifact-body{white-space:pre-wrap;font-family:'SFMono-Regular',Menlo,Monaco,monospace;font-size:14px;line-height:1.68;color:#102033;background:#f5f8fc;border-radius:12px;padding:14px;}"
+            ".artifact .artifact-table-body{background:transparent;padding:0;white-space:normal;font-family:var(--font-ui);}"
             ".artifact.image-anchor .artifact-body,.artifact.reference .artifact-body{font-family:var(--font-ui);}"
             ".artifact.image-anchor .artifact-body div{margin:4px 0;}"
             ".artifact-figure{margin:0;display:grid;gap:12px;}"
             ".artifact-image{display:block;max-width:100%;height:auto;border-radius:14px;border:1px solid rgba(184,197,218,.9);background:#fff;box-shadow:0 12px 28px rgba(60,74,97,.08);}"
             ".artifact-figure figcaption{font-family:var(--font-ui);font-size:14px;line-height:1.6;color:var(--muted);}"
+            ".artifact-source-caption{margin-top:12px;font-family:var(--font-ui);font-size:14px;line-height:1.6;color:var(--muted);}"
+            ".artifact-table-shell{overflow-x:auto;border:1px solid rgba(184,197,218,.72);border-radius:14px;background:#fff;}"
+            ".artifact-table{width:100%;border-collapse:collapse;font-family:var(--font-ui);font-size:14px;line-height:1.55;color:#102033;background:#fff;}"
+            ".artifact-table thead th{background:#edf4fb;font-weight:700;color:#17313a;}"
+            ".artifact-table th,.artifact-table td{padding:10px 12px;border:1px solid rgba(184,197,218,.72);text-align:left;vertical-align:top;white-space:nowrap;}"
+            ".artifact-table tbody tr:nth-child(even){background:#f8fbfe;}"
             ".artifact.reference .artifact-body{word-break:break-all;}"
             ".quote{border-left:5px solid #8cc4ce;padding-left:18px;margin-left:4px;}"
             ".footnote .zh,.caption .zh{font-size:16px;color:#334155;}"
@@ -3934,8 +4174,9 @@ class ExportService:
             output_dir,
             document_images=document_images,
         )
-        exported_assets.update(persisted_assets)
-        return exported_assets
+        merged_assets = dict(persisted_assets)
+        merged_assets.update(exported_assets)
+        return merged_assets
 
     def _export_epub_assets_for_chapter_bundle(
         self,
@@ -3951,8 +4192,9 @@ class ExportService:
             output_dir,
             document_images=bundle.document_images,
         )
-        exported_assets.update(persisted_assets)
-        return exported_assets
+        merged_assets = dict(persisted_assets)
+        merged_assets.update(exported_assets)
+        return merged_assets
 
     def _export_persisted_document_image_assets(
         self,
@@ -4066,15 +4308,11 @@ class ExportService:
             for image in (document_images or [])
             if getattr(image, "block_id", None)
         }
+        render_blocks_by_id = {block.block_id: block for block in render_blocks}
         pdf_image_specs: dict[str, tuple[str, int, list[float]]] = {}
         for block in render_blocks:
             if block.artifact_kind not in {"image", "figure"}:
                 continue
-            persisted_image = document_image_by_block_id.get(block.block_id)
-            if persisted_image is not None:
-                storage_path = Path(str(getattr(persisted_image, "storage_path", "") or "").strip())
-                if storage_path.is_file():
-                    continue
             crop_spec = self._pdf_asset_crop_spec(block)
             if crop_spec is None:
                 continue
@@ -4109,15 +4347,40 @@ class ExportService:
                     continue
                 target_path = asset_root / f"{block_id}.png"
                 persisted_image = document_image_by_block_id.get(block_id)
+                desired_width_px, desired_height_px = self._preferred_pdf_crop_pixel_size(
+                    render_blocks_by_id.get(block_id),
+                    persisted_image,
+                )
                 if persisted_image is not None:
                     materialized_path = self._materialized_document_image_path(persisted_image)
-                    if not materialized_path.exists():
-                        self._save_pdf_crop(page, rect, materialized_path)
+                    needs_refresh = self._document_image_needs_refresh(persisted_image)
+                    if not materialized_path.exists() or needs_refresh:
+                        self._save_pdf_crop(
+                            page,
+                            rect,
+                            materialized_path,
+                            desired_width_px=desired_width_px,
+                            desired_height_px=desired_height_px,
+                        )
+                        self._mark_document_image_materialized(
+                            persisted_image,
+                            materialized_path,
+                            render_scale=self._pdf_crop_render_scale(
+                                rect,
+                                desired_width_px=desired_width_px,
+                                desired_height_px=desired_height_px,
+                            ),
+                        )
                     if not target_path.exists():
                         shutil.copy2(materialized_path, target_path)
-                    self._mark_document_image_materialized(persisted_image, materialized_path)
                 elif not target_path.exists():
-                    self._save_pdf_crop(page, rect, target_path)
+                    self._save_pdf_crop(
+                        page,
+                        rect,
+                        target_path,
+                        desired_width_px=desired_width_px,
+                        desired_height_px=desired_height_px,
+                    )
                 relative_path_by_block_id[block_id] = PurePosixPath(
                     "assets",
                     "pdf-images",
@@ -4445,9 +4708,80 @@ class ExportService:
             return 0.0
         return (right - left) * (bottom - top)
 
-    def _save_pdf_crop(self, page: object, rect: object, target_path: Path) -> None:
+    def _preferred_pdf_crop_pixel_size(
+        self,
+        block: MergedRenderBlock | None,
+        document_image: object | None,
+    ) -> tuple[int | None, int | None]:
+        width_px = getattr(document_image, "width_px", None) if document_image is not None else None
+        height_px = getattr(document_image, "height_px", None) if document_image is not None else None
+        if not isinstance(width_px, int) and block is not None:
+            candidate = block.source_metadata.get("image_width_px")
+            if isinstance(candidate, (int, float)):
+                width_px = int(candidate)
+        if not isinstance(height_px, int) and block is not None:
+            candidate = block.source_metadata.get("image_height_px")
+            if isinstance(candidate, (int, float)):
+                height_px = int(candidate)
+        return (
+            width_px if isinstance(width_px, int) and width_px > 0 else None,
+            height_px if isinstance(height_px, int) and height_px > 0 else None,
+        )
+
+    def _document_image_needs_refresh(self, document_image: object) -> bool:
+        metadata = dict(getattr(document_image, "metadata_json", {}) or {})
+        if metadata.get("materialized_via") != "pdf_export_crop":
+            return True
+        if metadata.get("storage_status") != "materialized":
+            return True
+        version = metadata.get("materialized_version")
+        try:
+            return int(version) < _PDF_IMAGE_MATERIALIZATION_VERSION
+        except (TypeError, ValueError):
+            return True
+
+    def _pdf_crop_render_scale(
+        self,
+        rect: object,
+        *,
+        desired_width_px: int | None = None,
+        desired_height_px: int | None = None,
+    ) -> float:
+        rect_width = float(getattr(rect, "width", 0.0) or 0.0)
+        rect_height = float(getattr(rect, "height", 0.0) or 0.0)
+        scale_candidates = [2.0]
+        if desired_width_px and rect_width > 0:
+            scale_candidates.append(desired_width_px / rect_width)
+        if desired_height_px and rect_height > 0:
+            scale_candidates.append(desired_height_px / rect_height)
+        return max(1.0, min(max(scale_candidates), 4.0))
+
+    def _save_pdf_crop(
+        self,
+        page: object,
+        rect: object,
+        target_path: Path,
+        *,
+        desired_width_px: int | None = None,
+        desired_height_px: int | None = None,
+    ) -> None:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        pixmap = page.get_pixmap(clip=rect, alpha=False)
+        pixmap = None
+        render_scale = self._pdf_crop_render_scale(
+            rect,
+            desired_width_px=desired_width_px,
+            desired_height_px=desired_height_px,
+        )
+        if render_scale > 1.0:
+            try:
+                import fitz
+
+                matrix = fitz.Matrix(render_scale, render_scale)
+                pixmap = page.get_pixmap(matrix=matrix, clip=rect, alpha=False)
+            except (ImportError, AttributeError, TypeError):
+                pixmap = None
+        if pixmap is None:
+            pixmap = page.get_pixmap(clip=rect, alpha=False)
         try:
             pixmap.save(str(target_path))
         finally:
@@ -4458,7 +4792,13 @@ class ExportService:
         block_id = str(getattr(document_image, "block_id"))
         return (self.output_root.parent / "document-images" / document_id / f"{block_id}.png").resolve()
 
-    def _mark_document_image_materialized(self, document_image: object, materialized_path: Path) -> None:
+    def _mark_document_image_materialized(
+        self,
+        document_image: object,
+        materialized_path: Path,
+        *,
+        render_scale: float | None = None,
+    ) -> None:
         storage_path = str(materialized_path)
         if getattr(document_image, "storage_path", None) != storage_path:
             setattr(document_image, "storage_path", storage_path)
@@ -4468,8 +4808,11 @@ class ExportService:
                 "storage_status": "materialized",
                 "materialized_via": "pdf_export_crop",
                 "materialized_at": _utcnow().isoformat(),
+                "materialized_version": _PDF_IMAGE_MATERIALIZATION_VERSION,
             }
         )
+        if render_scale is not None:
+            metadata["materialized_render_scale"] = round(render_scale, 3)
         setattr(document_image, "metadata_json", metadata)
 
     def _safe_epub_archive_path(self, candidate: object) -> str | None:

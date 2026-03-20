@@ -2011,6 +2011,63 @@ class PdfBootstrapPipelineTests(unittest.TestCase):
         self.assertEqual(promoted[1].block_type, BlockType.CODE)
         self.assertIn("late_code_like_promoted", promoted[1].flags)
 
+    def test_recovery_promotes_comment_body_adjacent_to_code(self) -> None:
+        service = PdfStructureRecoveryService()
+        code_prefix = _RecoveredBlock(
+            role="code_like",
+            block_type=BlockType.CODE,
+            text="def build_agent(prompt: str) -> str:",
+            page_start=95,
+            page_end=95,
+            bbox_regions=[{"page_number": 95, "bbox": [72.0, 180.0, 540.0, 230.0]}],
+            reading_order_index=10,
+            parse_confidence=0.95,
+            flags=[],
+            metadata={"pdf_page_family": "body", "pdf_block_role": "code_like"},
+            font_size_avg=10.0,
+            source_path="pdf://page/95",
+            anchor="p95-b10",
+        )
+        comment_block = _RecoveredBlock(
+            role="body",
+            block_type=BlockType.PARAGRAPH,
+            text=(
+                "# Validate the prompt before building the chain.\n"
+                "# Reuse the cached planner when the prompt fingerprint matches."
+            ),
+            page_start=95,
+            page_end=95,
+            bbox_regions=[{"page_number": 95, "bbox": [72.0, 232.0, 540.0, 284.0]}],
+            reading_order_index=11,
+            parse_confidence=0.92,
+            flags=[],
+            metadata={"pdf_page_family": "body", "pdf_block_role": "body"},
+            font_size_avg=10.0,
+            source_path="pdf://page/95",
+            anchor="p95-b11",
+        )
+        code_suffix = _RecoveredBlock(
+            role="body",
+            block_type=BlockType.PARAGRAPH,
+            text="    return planner.run(prompt)",
+            page_start=95,
+            page_end=95,
+            bbox_regions=[{"page_number": 95, "bbox": [72.0, 286.0, 540.0, 332.0]}],
+            reading_order_index=12,
+            parse_confidence=0.92,
+            flags=[],
+            metadata={"pdf_page_family": "body", "pdf_block_role": "body"},
+            font_size_avg=10.0,
+            source_path="pdf://page/95",
+            anchor="p95-b12",
+        )
+
+        promoted = service._promote_late_code_like_bodies([code_prefix, comment_block, code_suffix])
+
+        self.assertEqual(promoted[1].role, "code_like")
+        self.assertEqual(promoted[1].block_type, BlockType.CODE)
+        self.assertIn("late_code_like_promoted", promoted[1].flags)
+
     def test_recovery_promotes_cross_page_code_body(self) -> None:
         service = PdfStructureRecoveryService()
         block = _RecoveredBlock(
@@ -3114,6 +3171,258 @@ class BasicPdfOutlineRecoveryTests(unittest.TestCase):
         page_evidence = parsed.metadata["pdf_page_evidence"]["pdf_pages"][0]
         self.assertEqual(page_evidence["raw_image_block_count"], 1)
         self.assertEqual(page_evidence["role_counts"]["image"], 1)
+
+    def test_recovery_keeps_book_inline_heading_image_legend_and_cross_page_bullet_structure(self) -> None:
+        recovery_service = PdfStructureRecoveryService()
+        extraction = PdfExtraction(
+            title="Tokenization Sample",
+            author="Test Author",
+            metadata={"pdf_extractor": "basic"},
+            outline_entries=[],
+            pages=[
+                PdfPage(
+                    page_number=1,
+                    width=612.0,
+                    height=792.0,
+                    blocks=[
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=1,
+                            text="Introduction 11",
+                            bbox=(108.0, 55.0, 504.0, 69.0),
+                            line_texts=["Introduction 11"],
+                            span_count=8,
+                            line_count=1,
+                            font_size_min=9.0,
+                            font_size_max=9.0,
+                            font_size_avg=9.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=2,
+                            text="Tokenization: Breaking Text into Pieces",
+                            bbox=(108.0, 406.0, 336.0, 420.0),
+                            line_texts=["Tokenization: Breaking Text into Pieces"],
+                            span_count=12,
+                            line_count=1,
+                            font_size_min=13.1,
+                            font_size_max=13.1,
+                            font_size_avg=13.1,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=3,
+                            text="Before a large language model can process text, that text needs to be broken",
+                            bbox=(108.0, 441.0, 504.0, 455.0),
+                            line_texts=["Before a large language model can process text, that text needs to be broken"],
+                            span_count=24,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=4,
+                            text="down into smaller units called tokens. Tokens can be individual words, parts of",
+                            bbox=(108.0, 461.0, 504.0, 475.0),
+                            line_texts=["down into smaller units called tokens. Tokens can be individual words, parts of"],
+                            span_count=24,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=5,
+                            text="words, or even single characters. The process of splitting text into tokens is",
+                            bbox=(108.0, 481.0, 504.0, 495.0),
+                            line_texts=["words, or even single characters. The process of splitting text into tokens is"],
+                            span_count=24,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=6,
+                            text="known as tokenization, and it’s a crucial step in preparing data for a language",
+                            bbox=(108.0, 502.0, 504.0, 516.0),
+                            line_texts=["known as tokenization, and it’s a crucial step in preparing data for a language"],
+                            span_count=24,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=7,
+                            text="model.",
+                            bbox=(108.0, 522.0, 142.0, 536.0),
+                            line_texts=["model."],
+                            span_count=4,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=8,
+                            text="This sentence contains 27 tokens",
+                            bbox=(237.0, 593.0, 375.0, 605.0),
+                            line_texts=["This sentence contains 27 tokens"],
+                            span_count=8,
+                            line_count=1,
+                            font_size_min=8.7,
+                            font_size_max=8.7,
+                            font_size_avg=8.7,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=9,
+                            text="Different LLMs use different tokenization strategies, which can have a significant",
+                            bbox=(108.0, 621.0, 506.0, 635.0),
+                            line_texts=["Different LLMs use different tokenization strategies, which can have a significant"],
+                            span_count=22,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=10,
+                            text="impact on the model’s performance and capabilities. Some common tokenizers used by LLMs include:",
+                            bbox=(108.0, 641.0, 504.0, 675.0),
+                            line_texts=[
+                                "impact on the model’s performance and capabilities. Some common",
+                                "tokenizers used by LLMs include:",
+                            ],
+                            span_count=26,
+                            line_count=2,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=11,
+                            text="• GPT (Byte Pair Encoding): GPT tokenizers use a technique called byte pair",
+                            bbox=(123.0, 696.0, 504.0, 710.0),
+                            line_texts=["• GPT (Byte Pair Encoding): GPT tokenizers use a technique called byte pair"],
+                            span_count=20,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                    ],
+                    image_blocks=[
+                        PdfImageBlock(
+                            page_number=1,
+                            block_number=12,
+                            bbox=(108.0, 545.0, 504.0, 589.0),
+                            width_px=717,
+                            height_px=80,
+                            image_ext="png",
+                        )
+                    ],
+                ),
+                PdfPage(
+                    page_number=2,
+                    width=612.0,
+                    height=792.0,
+                    blocks=[
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=1,
+                            text="Introduction 12",
+                            bbox=(108.0, 55.0, 504.0, 69.0),
+                            line_texts=["Introduction 12"],
+                            span_count=8,
+                            line_count=1,
+                            font_size_min=9.0,
+                            font_size_max=9.0,
+                            font_size_avg=9.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=2,
+                            text="encoding (BPE) to break text into subword units. BPE iteratively merges the most frequent pairs of bytes in a text corpus.",
+                            bbox=(133.0, 89.0, 504.0, 143.0),
+                            line_texts=[
+                                "encoding (BPE) to break text into subword units. BPE iteratively merges",
+                                "the most frequent pairs of bytes in a text corpus.",
+                            ],
+                            span_count=24,
+                            line_count=2,
+                            font_size_min=11.0,
+                            font_size_max=11.0,
+                            font_size_avg=11.0,
+                        ),
+                    ],
+                    image_blocks=[],
+                ),
+            ],
+        )
+        profile = PdfFileProfile(
+            pdf_kind="text_pdf",
+            page_count=2,
+            has_extractable_text=True,
+            outline_present=False,
+            layout_risk="low",
+            ocr_required=False,
+            extractor_kind="basic",
+        )
+
+        parsed = recovery_service.recover("tokenization-structure-sample.pdf", extraction, profile)
+        chapter_blocks = parsed.chapters[0].blocks
+
+        heading_block = next(
+            block
+            for block in chapter_blocks
+            if block.block_type == BlockType.HEADING.value
+            and block.text == "Tokenization: Breaking Text into Pieces"
+        )
+        intro_body_block = next(
+            block
+            for block in chapter_blocks
+            if block.block_type == BlockType.PARAGRAPH.value
+            and block.text.startswith("Before a large language model can process text")
+        )
+        image_block = next(block for block in chapter_blocks if block.block_type == BlockType.IMAGE.value)
+        caption_block = next(
+            block
+            for block in chapter_blocks
+            if block.block_type == BlockType.CAPTION.value
+            and block.text == "This sentence contains 27 tokens"
+        )
+        prose_block = next(
+            block
+            for block in chapter_blocks
+            if block.block_type == BlockType.PARAGRAPH.value
+            and block.text.startswith("Different LLMs use different tokenization strategies")
+        )
+        bullet_block = next(
+            block
+            for block in chapter_blocks
+            if block.block_type == BlockType.PARAGRAPH.value
+            and block.text.startswith("• GPT (Byte Pair Encoding):")
+        )
+
+        self.assertNotIn("Before a large language model", heading_block.text)
+        self.assertFalse(intro_body_block.text.startswith("Tokenization:"))
+        self.assertEqual(image_block.metadata["linked_caption_text"], "This sentence contains 27 tokens")
+        self.assertTrue(caption_block.metadata["caption_for_source_anchor"].endswith(image_block.anchor))
+        self.assertLess(image_block.ordinal, caption_block.ordinal)
+        self.assertLess(caption_block.ordinal, prose_block.ordinal)
+        self.assertIn("encoding (BPE) to break text into subword units.", bullet_block.text)
+        self.assertEqual(bullet_block.metadata["source_page_start"], 1)
+        self.assertEqual(bullet_block.metadata["source_page_end"], 2)
 
     def test_recovery_classifies_centered_equation_block_as_equation(self) -> None:
         recovery_service = PdfStructureRecoveryService()
@@ -6116,6 +6425,154 @@ class PdfDocumentImagePersistenceTests(unittest.TestCase):
             self.assertTrue(copied_asset.exists())
             self.assertEqual(copied_asset.read_bytes(), materialized_asset.read_bytes())
 
+    def test_pdf_export_refreshes_stale_materialized_images_with_fresh_crop(self) -> None:
+        class _StubPdfParser:
+            def parse(self, _file_path, profile=None):
+                return ParsedDocument(
+                    title="Image Sample",
+                    author="Test Author",
+                    language="en",
+                    chapters=[
+                        ParsedChapter(
+                            chapter_id="pdf-chapter-image-refresh-001",
+                            href="pdf://page/1",
+                            title="Image Sample",
+                            blocks=[
+                                ParsedBlock(
+                                    block_type=BlockType.IMAGE.value,
+                                    text="[Image]",
+                                    source_path="pdf://page/1",
+                                    ordinal=1,
+                                    anchor="p1-img1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [72.0, 240.0, 420.0, 520.0]}
+                                            ]
+                                        },
+                                        "image_type": "embedded_image",
+                                        "image_ext": "png",
+                                        "image_width_px": 1280,
+                                        "image_height_px": 960,
+                                        "image_alt": "System overview diagram",
+                                    },
+                                    parse_confidence=0.97,
+                                )
+                            ],
+                            metadata={"source_page_start": 1, "source_page_end": 1},
+                        )
+                    ],
+                    metadata={},
+                )
+
+        class _FakePixmap:
+            def __init__(self, payload: bytes) -> None:
+                self.payload = payload
+
+            def save(self, path: str) -> None:
+                Path(path).write_bytes(self.payload)
+
+        class _FakePage:
+            def get_pixmap(self, clip=None, alpha=False, matrix=None):
+                return _FakePixmap(b"fresh-hires-pdf-crop" if matrix is not None else b"stale-crop")
+
+        class _FakeDocument:
+            page_count = 1
+
+            def load_page(self, index: int):
+                self.last_index = index
+                return _FakePage()
+
+            def close(self) -> None:
+                return None
+
+        class _FakeRect:
+            def __init__(self, x0: float, y0: float, x1: float, y1: float) -> None:
+                self.width = x1 - x0
+                self.height = y1 - y0
+
+        class _FakeMatrix:
+            def __init__(self, sx: float, sy: float) -> None:
+                self.sx = sx
+                self.sy = sy
+
+        class _FakeFitz:
+            @staticmethod
+            def open(_path: str):
+                return _FakeDocument()
+
+            @staticmethod
+            def Rect(x0: float, y0: float, x1: float, y1: float):
+                return _FakeRect(x0, y0, x1, y1)
+
+            @staticmethod
+            def Matrix(sx: float, sy: float):
+                return _FakeMatrix(sx, sy)
+
+        original_fitz = sys.modules.get("fitz")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sys.modules["fitz"] = _FakeFitz()
+                source_pdf = Path(tmpdir) / "source.pdf"
+                source_pdf.write_bytes(b"%PDF-1.4 fake")
+                stale_asset = Path(tmpdir) / "stale-image.png"
+                stale_asset.write_bytes(b"old-lowres-image")
+                output_dir = Path(tmpdir) / "exports"
+
+                now = datetime.now(timezone.utc)
+                document = Document(
+                    id="55555555-5555-4555-8555-555555555555",
+                    source_type=SourceType.PDF_TEXT,
+                    file_fingerprint="fingerprint-image-refresh-test",
+                    source_path=str(source_pdf),
+                    status=DocumentStatus.INGESTED,
+                    metadata_json={"pdf_profile": {"pdf_kind": "text_pdf", "layout_risk": "low"}},
+                    created_at=now,
+                    updated_at=now,
+                )
+                parse_artifacts = ParseService(pdf_parser=_StubPdfParser()).parse(document, "sample.pdf")
+                parse_artifacts.document_images[0].storage_path = str(stale_asset)
+                parse_artifacts.document_images[0].metadata_json = {
+                    **(parse_artifacts.document_images[0].metadata_json or {}),
+                    "storage_status": "materialized",
+                    "materialized_via": "pdf_export_crop",
+                    "materialized_version": 1,
+                }
+                artifacts = BootstrapArtifacts(
+                    document=parse_artifacts.document,
+                    chapters=parse_artifacts.chapters,
+                    blocks=parse_artifacts.blocks,
+                    sentences=[],
+                    document_images=parse_artifacts.document_images,
+                )
+
+                with self.session_factory() as session:
+                    BootstrapRepository(session).save(artifacts)
+                    session.commit()
+
+                    export_repository = ExportRepository(session)
+                    export_service = ExportService(export_repository, output_root=output_dir)
+                    chapter_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+                    asset_map = export_service._export_epub_assets_for_chapter_bundle(chapter_bundle, output_dir)
+                    session.commit()
+
+                    reloaded_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+
+                block_id = parse_artifacts.blocks[0].id
+                self.assertEqual(asset_map[block_id], f"assets/pdf-images/{block_id}.png")
+                refreshed_asset = output_dir / asset_map[block_id]
+                self.assertEqual(refreshed_asset.read_bytes(), b"fresh-hires-pdf-crop")
+                self.assertEqual(Path(reloaded_bundle.document_images[0].storage_path).read_bytes(), b"fresh-hires-pdf-crop")
+                self.assertEqual(reloaded_bundle.document_images[0].metadata_json["materialized_version"], 2)
+                self.assertGreaterEqual(reloaded_bundle.document_images[0].metadata_json["materialized_render_scale"], 2.0)
+        finally:
+            if original_fitz is None:
+                sys.modules.pop("fitz", None)
+            else:
+                sys.modules["fitz"] = original_fitz
+
     def test_pdf_export_materializes_document_images_for_reuse(self) -> None:
         class _StubPdfParser:
             def parse(self, _file_path, profile=None):
@@ -6344,6 +6801,173 @@ class PdfDocumentImagePersistenceTests(unittest.TestCase):
         self.assertEqual(render_blocks[0].artifact_kind, "image")
         self.assertEqual(render_blocks[0].source_text, "Figure 1. System overview diagram.")
 
+    def test_image_anchor_html_renders_image_before_translated_caption(self) -> None:
+        class _StubPdfParser:
+            def parse(self, _file_path, profile=None):
+                return ParsedDocument(
+                    title="Image Sample",
+                    author="Test Author",
+                    language="en",
+                    chapters=[
+                        ParsedChapter(
+                            chapter_id="pdf-chapter-image-order-001",
+                            href="pdf://page/1",
+                            title="Image Sample",
+                            blocks=[
+                                ParsedBlock(
+                                    block_type=BlockType.IMAGE.value,
+                                    text="[Image]",
+                                    source_path="pdf://page/1",
+                                    ordinal=1,
+                                    anchor="p1-img1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [72.0, 240.0, 420.0, 520.0]}
+                                            ]
+                                        },
+                                        "image_type": "embedded_image",
+                                        "image_ext": "png",
+                                        "image_width_px": 1024,
+                                        "image_height_px": 768,
+                                        "linked_caption_text": "Figure 1. System overview diagram.",
+                                        "linked_caption_source_anchor": "pdf://page/1#p1-cap1",
+                                    },
+                                    parse_confidence=0.97,
+                                ),
+                                ParsedBlock(
+                                    block_type=BlockType.CAPTION.value,
+                                    text="Figure 1. System overview diagram.",
+                                    source_path="pdf://page/1",
+                                    ordinal=2,
+                                    anchor="p1-cap1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "caption_for_source_anchor": "pdf://page/1#p1-img1",
+                                    },
+                                    parse_confidence=0.94,
+                                ),
+                            ],
+                            metadata={"source_page_start": 1, "source_page_end": 1},
+                        )
+                    ],
+                    metadata={},
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="89898989-8989-4898-8898-898989898989",
+            source_type=SourceType.PDF_TEXT,
+            file_fingerprint="fingerprint-image-caption-html-order-test",
+            source_path="sample.pdf",
+            status=DocumentStatus.INGESTED,
+            metadata_json={"pdf_profile": {"pdf_kind": "text_pdf", "layout_risk": "low"}},
+            created_at=now,
+            updated_at=now,
+        )
+        parse_artifacts = ParseService(pdf_parser=_StubPdfParser()).parse(document, "sample.pdf")
+        artifacts = BootstrapArtifacts(
+            document=parse_artifacts.document,
+            chapters=parse_artifacts.chapters,
+            blocks=parse_artifacts.blocks,
+            sentences=[],
+            document_images=parse_artifacts.document_images,
+        )
+
+        with self.session_factory() as session:
+            BootstrapRepository(session).save(artifacts)
+            session.commit()
+
+            export_repository = ExportRepository(session)
+            export_service = ExportService(export_repository)
+            chapter_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+            render_blocks = export_service._render_blocks_for_chapter(chapter_bundle)
+
+        render_blocks[0].target_text = "图 1. 系统总览图。"
+        html_block = export_service._render_block_html(
+            render_blocks[0],
+            {render_blocks[0].block_id: "assets/pdf-images/p1-img1.png"},
+        )
+        self.assertIn("artifact-source-caption", html_block)
+        self.assertLess(html_block.index("<img"), html_block.index("图 1. 系统总览图。"))
+
+    def test_export_does_not_promote_bullet_paragraph_with_parenthetical_label_to_code(self) -> None:
+        class _StubPdfParser:
+            def parse(self, _file_path, profile=None):
+                return ParsedDocument(
+                    title="Bullet Sample",
+                    author="Test Author",
+                    language="en",
+                    chapters=[
+                        ParsedChapter(
+                            chapter_id="pdf-chapter-bullet-paragraph-001",
+                            href="pdf://page/1",
+                            title="Bullet Sample",
+                            blocks=[
+                                ParsedBlock(
+                                    block_type=BlockType.PARAGRAPH.value,
+                                    text="• GPT (Byte Pair Encoding): GPT tokenizers use a technique called byte pair",
+                                    source_path="pdf://page/1",
+                                    ordinal=1,
+                                    anchor="p1-bullet1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [123.0, 696.0, 504.0, 710.0]}
+                                            ]
+                                        },
+                                        "reading_order_index": 1,
+                                        "pdf_page_family": "body",
+                                    },
+                                    parse_confidence=0.96,
+                                )
+                            ],
+                            metadata={"source_page_start": 1, "source_page_end": 1},
+                        )
+                    ],
+                    metadata={},
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="8a8a8a8a-8a8a-48a8-88a8-8a8a8a8a8a8a",
+            source_type=SourceType.PDF_TEXT,
+            file_fingerprint="fingerprint-bullet-code-promotion-test",
+            source_path="sample.pdf",
+            status=DocumentStatus.INGESTED,
+            metadata_json={"pdf_profile": {"pdf_kind": "text_pdf", "layout_risk": "low"}},
+            created_at=now,
+            updated_at=now,
+        )
+        parse_artifacts = ParseService(pdf_parser=_StubPdfParser()).parse(document, "sample.pdf")
+        artifacts = BootstrapArtifacts(
+            document=parse_artifacts.document,
+            chapters=parse_artifacts.chapters,
+            blocks=parse_artifacts.blocks,
+            sentences=[],
+            document_images=parse_artifacts.document_images,
+        )
+
+        with self.session_factory() as session:
+            BootstrapRepository(session).save(artifacts)
+            session.commit()
+
+            export_repository = ExportRepository(session)
+            export_service = ExportService(export_repository)
+            chapter_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+            render_blocks = export_service._render_blocks_for_chapter(chapter_bundle)
+
+        self.assertEqual(len(render_blocks), 1)
+        self.assertEqual(render_blocks[0].block_type, BlockType.PARAGRAPH.value)
+        self.assertIsNone(render_blocks[0].artifact_kind)
+        self.assertNotEqual(render_blocks[0].render_mode, "source_artifact_full_width")
+        self.assertNotEqual(render_blocks[0].notice, "代码保持原样")
+
     def test_export_treats_equation_blocks_as_equation_artifacts(self) -> None:
         class _StubPdfParser:
             def parse(self, _file_path, profile=None):
@@ -6497,6 +7121,89 @@ class PdfDocumentImagePersistenceTests(unittest.TestCase):
             render_blocks[0].source_metadata["linked_caption_text"],
             "Table 1. Translation quality and training cost.",
         )
+
+    def test_table_artifact_html_uses_semantic_table_markup_when_structure_is_recoverable(self) -> None:
+        class _StubPdfParser:
+            def parse(self, _file_path, profile=None):
+                return ParsedDocument(
+                    title="Table Sample",
+                    author="Test Author",
+                    language="en",
+                    chapters=[
+                        ParsedChapter(
+                            chapter_id="pdf-chapter-table-html-001",
+                            href="pdf://page/1",
+                            title="Table Sample",
+                            blocks=[
+                                ParsedBlock(
+                                    block_type=BlockType.TABLE.value,
+                                    text="Model  BLEU  Cost\nTransformer  27.5  1.0x10^19",
+                                    source_path="pdf://page/1",
+                                    ordinal=1,
+                                    anchor="p1-tbl1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "pdf_block_role": "table_like",
+                                        "linked_caption_text": "Table 1. Translation quality and training cost.",
+                                        "linked_caption_source_anchor": "pdf://page/1#p1-cap1",
+                                    },
+                                    parse_confidence=0.97,
+                                ),
+                                ParsedBlock(
+                                    block_type=BlockType.CAPTION.value,
+                                    text="Table 1. Translation quality and training cost.",
+                                    source_path="pdf://page/1",
+                                    ordinal=2,
+                                    anchor="p1-cap1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "caption_for_source_anchor": "pdf://page/1#p1-tbl1",
+                                    },
+                                    parse_confidence=0.94,
+                                ),
+                            ],
+                            metadata={"source_page_start": 1, "source_page_end": 1},
+                        )
+                    ],
+                    metadata={},
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="35353535-3535-4353-8535-353535353535",
+            source_type=SourceType.PDF_TEXT,
+            file_fingerprint="fingerprint-table-html-render-test",
+            source_path="sample.pdf",
+            status=DocumentStatus.INGESTED,
+            metadata_json={"pdf_profile": {"pdf_kind": "text_pdf", "layout_risk": "low"}},
+            created_at=now,
+            updated_at=now,
+        )
+        parse_artifacts = ParseService(pdf_parser=_StubPdfParser()).parse(document, "sample.pdf")
+        artifacts = BootstrapArtifacts(
+            document=parse_artifacts.document,
+            chapters=parse_artifacts.chapters,
+            blocks=parse_artifacts.blocks,
+            sentences=[],
+            document_images=parse_artifacts.document_images,
+        )
+
+        with self.session_factory() as session:
+            BootstrapRepository(session).save(artifacts)
+            session.commit()
+
+            export_repository = ExportRepository(session)
+            export_service = ExportService(export_repository)
+            chapter_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+            render_blocks = export_service._render_blocks_for_chapter(chapter_bundle)
+
+        render_blocks[0].target_text = "表 1. 翻译质量与训练成本。"
+        html_block = export_service._render_block_html(render_blocks[0])
+        self.assertIn("<table class='artifact-table'>", html_block)
+        self.assertIn("<th>Model</th>", html_block)
+        self.assertIn("<td>Transformer</td>", html_block)
 
     def test_export_merges_linked_pdf_table_caption_and_adjacent_context_into_single_render_block(self) -> None:
         class _StubPdfParser:
@@ -6706,6 +7413,125 @@ class PdfDocumentImagePersistenceTests(unittest.TestCase):
             render_blocks[0].source_metadata["linked_caption_text"],
             "Equation 1. Decoder token distribution.",
         )
+
+    def test_export_suppresses_uncaptioned_inline_image_between_code_fragments(self) -> None:
+        class _StubPdfParser:
+            def parse(self, _file_path, profile=None):
+                return ParsedDocument(
+                    title="Code Image Sample",
+                    author="Test Author",
+                    language="en",
+                    chapters=[
+                        ParsedChapter(
+                            chapter_id="pdf-chapter-code-image-001",
+                            href="pdf://page/1",
+                            title="Code Image Sample",
+                            blocks=[
+                                ParsedBlock(
+                                    block_type=BlockType.CODE.value,
+                                    text="def build_agent(prompt: str) -> str:\n    planner = load_planner()",
+                                    source_path="pdf://page/1",
+                                    ordinal=1,
+                                    anchor="p1-code1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [72.0, 180.0, 520.0, 252.0]}
+                                            ]
+                                        },
+                                        "reading_order_index": 1,
+                                        "pdf_page_family": "body",
+                                        "pdf_block_role": "code_like",
+                                    },
+                                    parse_confidence=0.97,
+                                ),
+                                ParsedBlock(
+                                    block_type=BlockType.IMAGE.value,
+                                    text="[Image]",
+                                    source_path="pdf://page/1",
+                                    ordinal=2,
+                                    anchor="p1-img1",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [88.0, 258.0, 168.0, 314.0]}
+                                            ]
+                                        },
+                                        "reading_order_index": 2,
+                                        "image_type": "embedded_image",
+                                        "image_ext": "png",
+                                        "image_width_px": 320,
+                                        "image_height_px": 180,
+                                        "pdf_page_family": "body",
+                                        "pdf_block_role": "image",
+                                    },
+                                    parse_confidence=0.82,
+                                ),
+                                ParsedBlock(
+                                    block_type=BlockType.CODE.value,
+                                    text="    return planner.run(prompt)",
+                                    source_path="pdf://page/1",
+                                    ordinal=3,
+                                    anchor="p1-code2",
+                                    metadata={
+                                        "source_page_start": 1,
+                                        "source_page_end": 1,
+                                        "source_bbox_json": {
+                                            "regions": [
+                                                {"page_number": 1, "bbox": [72.0, 320.0, 520.0, 364.0]}
+                                            ]
+                                        },
+                                        "reading_order_index": 3,
+                                        "pdf_page_family": "body",
+                                        "pdf_block_role": "code_like",
+                                    },
+                                    parse_confidence=0.96,
+                                ),
+                            ],
+                            metadata={"source_page_start": 1, "source_page_end": 1},
+                        )
+                    ],
+                    metadata={},
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="67676767-6767-4676-8676-676767676767",
+            source_type=SourceType.PDF_TEXT,
+            file_fingerprint="fingerprint-code-image-merge-test",
+            source_path="sample.pdf",
+            status=DocumentStatus.INGESTED,
+            metadata_json={"pdf_profile": {"pdf_kind": "text_pdf", "layout_risk": "low"}},
+            created_at=now,
+            updated_at=now,
+        )
+        parse_artifacts = ParseService(pdf_parser=_StubPdfParser()).parse(document, "sample.pdf")
+        artifacts = BootstrapArtifacts(
+            document=parse_artifacts.document,
+            chapters=parse_artifacts.chapters,
+            blocks=parse_artifacts.blocks,
+            sentences=[],
+            document_images=parse_artifacts.document_images,
+        )
+
+        with self.session_factory() as session:
+            BootstrapRepository(session).save(artifacts)
+            session.commit()
+
+            export_repository = ExportRepository(session)
+            export_service = ExportService(export_repository)
+            chapter_bundle = export_repository.load_chapter_bundle(parse_artifacts.chapters[0].id)
+            render_blocks = export_service._render_blocks_for_chapter(chapter_bundle)
+
+        self.assertEqual(len(render_blocks), 1)
+        self.assertEqual(render_blocks[0].artifact_kind, "code")
+        self.assertIn("def build_agent", render_blocks[0].source_text)
+        self.assertIn("return planner.run", render_blocks[0].source_text)
+        self.assertIn("export_inline_image_between_code_suppressed", render_blocks[0].source_metadata["recovery_flags"])
 
     def test_export_and_summary_report_linked_caption_counts(self) -> None:
         class _StubPdfParser:

@@ -4,6 +4,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from http.client import IncompleteRead, RemoteDisconnected
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -62,12 +63,21 @@ class UrllibJSONTransport:
         )
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
-                raw = response.read().decode("utf-8")
+                try:
+                    raw_bytes = response.read()
+                except IncompleteRead as exc:
+                    if exc.partial:
+                        raw_bytes = exc.partial
+                    else:
+                        raise ProviderTransportError("Provider response stream ended unexpectedly.") from exc
+                raw = raw_bytes.decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise ProviderHTTPError(exc.code, detail or str(exc.reason)) from exc
         except URLError as exc:
             raise ProviderNetworkError(str(exc.reason)) from exc
+        except RemoteDisconnected as exc:
+            raise ProviderTransportError("Provider disconnected before sending a complete response.") from exc
 
         try:
             return json.loads(raw)

@@ -1,6 +1,6 @@
 # PDF Backlog
 
-Last Updated: 2026-03-16
+Last Updated: 2026-03-20
 
 ## Purpose
 
@@ -81,6 +81,10 @@ Last Updated: 2026-03-16
 - [x] special-section subheading policy hardening（第一刀：appendix continuation 页上的顶层子标题）
 - [x] nested appendix subheading policy（第一刀：先进入 page/review evidence，不直接切 section tree）
 - [x] review/export evidence 增强：让 `backmatter / appendix / index` 的 preserve policy 更易审校
+- [x] image-anchor export repair：最终 HTML/Markdown 里图片稳定位于 caption 上方，不再倒置
+- [x] PDF image materialization refresh v2：fresh crop 会覆盖旧持久化图片，并按目标像素尺寸重渲染，避免历史低清图片复用
+- [x] recoverable table semantic export 第一刀：能稳定恢复结构的表格导出为 HTML `<table>`，而不是一律退化为纯文本
+- [x] code continuity hardening 第一刀：comment-only code body promotion + `code -> inline image -> code` 误切桥接
 - [x] backmatter cue hardening：`appendix -> tail body` 在 explicit cue 下可升级为 `backmatter`
 - [ ] nested appendix section-tree upgrade：决定 `K.2.5` 这类嵌套小节何时从 evidence 升级为正式 section tree
 - [ ] chapter-intro title cleanup v2：继续清理 `Adeep / Dataislikegarbage / canyougo` 这类更深层断词噪声
@@ -107,7 +111,7 @@ Last Updated: 2026-03-16
 - [ ] OCR 置信度传播
 - [ ] 扫描型 PDF 主路径
 - [ ] 双栏 robust support
-- [ ] 图表 / 公式 / 代码的更强保护
+- [ ] 图表 / 公式 / 代码的更强保护（当前已补 image/table/code 第一刀 contract，但复杂双栏、跨页表格、复杂公式仍未覆盖）
 - [ ] 高风险页自动送审
 
 ## Suggested Order

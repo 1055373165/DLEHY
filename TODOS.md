@@ -1,6 +1,6 @@
 # TODOS
 
-Last Updated: 2026-03-18
+Last Updated: 2026-03-20
 
 ## Purpose
 
@@ -107,6 +107,10 @@ Last Updated: 2026-03-18
   - `pdf_page_debug_evidence`
   - `pdf_preserve_evidence`
 - `bilingual_html` 已使用 block-level render contract，不再绕开 preserve policy
+- `image_anchor` 导出已修正为“图片在上、caption 在下”，不再把图注排到图片上方
+- PDF 图片导出现在会刷新旧持久化 crop，并按更高目标像素尺寸重渲染，避免 merged HTML 继续复用历史低清图片
+- recoverable table 已支持语义化 HTML `<table>` 导出，而不是一律降级成 monospace 文本块
+- code continuity 已补第一刀：紧邻代码的 comment-only body 会提升为 code，`code -> inline image -> code` 的误切在 export 侧会桥接收敛
 
 ### Academic Paper Lane
 
@@ -179,6 +183,8 @@ Last Updated: 2026-03-18
 - medium-risk PDF 虽可放行，但只是“可进链路”，不是“默认稳定交付”
 - academic paper 的双栏 reading order 仍未 robust
 - table / figure / equation-heavy 页面仍需更强 around-order hardening
+- 语义化 table export 当前只覆盖规则较稳定的可恢复表格；复杂跨页/合并单元格表格仍以 preserve/fallback 为主
+- code continuity repair 当前只处理“夹在两段代码之间的无 caption 可疑图片”这一类误插入，不等于已完全解决复杂版式下的 code/figure 边界
 - appendix 内更细 section tree 仍未正式进入公共 contract
 - `LLMs in Production` 仍残留更深层 extractor 断词噪声：
   - `Adeep`
