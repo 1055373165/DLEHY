@@ -1,17 +1,17 @@
 # 项目进度
 
 ## 项目信息
-- 项目名称：英文书籍中译产品化 Web 交付
-- 一句话目标：将当前项目的 EPUB / PDF 英文书籍高保真中译能力产品化，通过 Web 工作台让用户完成上传、整书转换、状态查看与中文结果下载。
+- 项目名称：Book Agent 产品化与 Multi-Agent 升级
+- 一句话目标：在现有 Book Agent Web 译制台基础上，将翻译主链路升级为 deterministic multi-agent control plane，Phase 1 交付 EPUB / PDF_TEXT / PDF_MIXED 的 merged markdown 与 bilingual HTML。
 - 创建时间：2026-03-20
-- 最后更新：2026-03-21
+- 最后更新：2026-03-22
 - 协议版本：v2
 
 ## 全局指标
-- 总阶段数：5
-- 总 MDU 数：35
-- 已完成 MDU：35
-- 整体完成度：100%
+- 总阶段数：10
+- 总 MDU 数：50
+- 已完成 MDU：45
+- 整体完成度：90%
 - 最大拆解深度：3 层
 
 ## 阶段总览
@@ -22,6 +22,11 @@
 | 阶段 3：质量审查与回归闭环 | 已完成 | 3 | 3 | 100% |
 | 阶段 4：真实样本验收与推广 | 已完成 | 11 | 11 | 100% |
 | 阶段 5：Web 产品化与用户入口 | 已完成 | 11 | 11 | 100% |
+| 阶段 6：Multi-Agent 需求锁定与执行接管 | 已完成 | 3 | 3 | 100% |
+| 阶段 7：Memory Service 与 Compiled Context | 已完成 | 3 | 3 | 100% |
+| 阶段 8：Chapter-Lane Packet Control | 已完成 | 3 | 3 | 100% |
+| 阶段 9：Deterministic Review Gate Cleanup | 进行中 | 3 | 1 | 33% |
+| 阶段 10：Layout Validation 与 Phase 1 验收 | 未开始 | 3 | 0 | 0% |
 
 ## 近期运行修复
 - 2026-03-21：翻译器已将“consistency and care over time”类抽象服务化跑偏下沉为新的 `source-aware literalism` 规则，并在 user prompt contract 中明确“Source-Aware Guardrails 优先于泛化润色”。真实 `deepseek-chat` 复测表明，这层约束能把样本尾句从“长期服务中提供连贯性和关怀”拉回到“长期稳定、周到地照应你”的更具体、更像中文技术书的表达。
@@ -197,11 +202,71 @@
   - [x] MDU-5.4.3：更新字体、背景、色板与路径容器样式，修复书库历史长文案截断 [依赖：MDU-5.4.2]
   - [x] MDU-5.4.4：复跑入口与 history / bootstrap API 定向验证，并同步 ADR / handoff 文档 [依赖：MDU-5.4.3]
 
+### 阶段 6：Multi-Agent 需求锁定与执行接管
+#### 任务 6.1：锁定 Phase 1 multi-agent 升级边界
+- 状态：已完成
+- 子任务：
+  - [x] 锁定 Phase 1 输入范围、输出范围与非目标
+  - [x] 输出 repo-aligned 最终实施稿
+  - [x] 将实施稿接入 autopilot 接管流程
+- 最小开发单元：
+  - [x] MDU-6.1.1：锁定 deterministic control plane、Markdown working view、Phase 1 产物边界 [依赖：MDU-5.4.4]
+  - [x] MDU-6.1.2：新增 `docs/multi-agent-final-implementation-plan.md`，固化模块边界、状态机、数据增量与 Phase 1 顺序 [依赖：MDU-6.1.1]
+  - [x] MDU-6.1.3：读取 `auto-pilot.md`，将 multi-agent 升级切换到全周期 autopilot 接手模式 [依赖：MDU-6.1.2]
+
+### 阶段 7：Memory Service 与 Compiled Context
+#### 任务 7.1：显式化翻译上下文与 memory read 路径
+- 状态：已完成
+- 子任务：
+  - [x] 新增 `MemoryService` 作为 chapter memory 读入口
+  - [x] 引入 `CompiledTranslationContext`
+  - [x] 将 `TranslationService` 接到显式 compiled context，并补回归测试
+- 最小开发单元：
+  - [x] MDU-7.1.1：新增 `src/book_agent/services/memory_service.py`，统一 chapter memory 读取与 compiled context 装配 [依赖：MDU-6.1.3]
+  - [x] MDU-7.1.2：在 `workers/contracts.py` / `context_compile.py` / `translation.py` 中接入 `CompiledTranslationContext` 与版本元数据 [依赖：MDU-7.1.1]
+  - [x] MDU-7.1.3：新增 `tests/test_memory_service.py`，并通过 compiled context 与 translation metadata 定向回归 [依赖：MDU-7.1.2]
+
+### 阶段 8：Chapter-Lane Packet Control
+#### 任务 8.1：在 run control 层落实“章间并行、章内串行”
+- 状态：已完成
+- 子任务：
+  - [x] 锁定 chapter lane 下的 packet active 规则
+  - [x] 在 executor / run execution 中实现按 chapter 的 active packet 约束
+  - [x] 补 chapter-lane serialization 回归
+- 最小开发单元：
+  - [x] MDU-8.1.1：定义 packet runtime substate 与 per-chapter active packet 选择规则 [依赖：MDU-7.1.3]
+  - [x] MDU-8.1.2：在 `document_run_executor.py` / `run_execution.py` 中只允许每章一个 active translate packet [依赖：MDU-8.1.1]
+  - [x] MDU-8.1.3：新增 chapter-lane serialization 定向回归，证明同章不会并发翻译 [依赖：MDU-8.1.2]
+
+### 阶段 9：Deterministic Review Gate Cleanup
+#### 任务 9.1：收紧 issue family、rerun stop rule 与 manual hold 升级
+- 状态：进行中
+- 子任务：
+  - [x] 统一 review issue family 与 rerun action 映射
+  - [ ] 加入 repeated-failure stop rule
+  - [ ] 明确 manual hold 升级条件
+- 最小开发单元：
+  - [x] MDU-9.1.1：在 `review.py` / `rule_engine.py` 中收敛 deterministic issue family 和 action 映射 [依赖：MDU-8.1.3]
+  - [ ] MDU-9.1.2：在 rerun / run control 路径加入 repeated-failure stop rule 与 manual hold 升级逻辑 [依赖：MDU-9.1.1]
+  - [ ] MDU-9.1.3：补 issue routing 与 stop rule 回归，证明 rerun 不会同参无限循环 [依赖：MDU-9.1.2]
+
+### 阶段 10：Layout Validation 与 Phase 1 验收
+#### 任务 10.1：在 export 前增加 layout gate，并完成 Phase 1 回归收口
+- 状态：未开始
+- 子任务：
+  - [ ] 新增 `layout_validate.py`
+  - [ ] 将 export 变为 review + layout 双 gate
+  - [ ] 跑完最小回归语料并更新文档快照
+- 最小开发单元：
+  - [ ] MDU-10.1.1：新增 `src/book_agent/services/layout_validate.py`，实现 heading / figure / footnote / table 的 preflight 结构校验 [依赖：MDU-9.1.3]
+  - [ ] MDU-10.1.2：将 `export.py` 接入 layout validation gate，并把失败映射为显式阻断 issue [依赖：MDU-10.1.1]
+  - [ ] MDU-10.1.3：跑通 EPUB + text PDF + mixed PDF 最小回归语料，更新 `docs/multi-agent-final-implementation-plan.md`、`DECISIONS.md` 与 `PROGRESS.md`，完成 Phase 1 收口 [依赖：MDU-10.1.2]
+
 ## 当前位置
-- 当前阶段：已完成 Web 产品化 autopilot slice 与第二轮首页工作台收敛
-- 当前任务：等待下一轮产品迭代，优先考虑浏览器级 UI QA、代码块保真导出与更细的结果预览能力
-- 当前最小开发单元：无
-- 整体完成度：100%
+- 当前阶段：阶段 9：Deterministic Review Gate Cleanup
+- 当前任务：任务 9.1：收紧 issue family、rerun stop rule 与 manual hold 升级
+- 当前最小开发单元：MDU-9.1.2：在 rerun / run control 路径加入 repeated-failure stop rule 与 manual hold 升级逻辑
+- 整体完成度：90%
 
 ## 变更记录
 | 时间 | 类型 | 描述 | 影响范围 |
@@ -218,6 +283,13 @@
 | 2026-03-20 | 验证 | 已完成更广的 workflow/export 稳定性扩回归，确认事务内 schema probe 只剩 bootstrap/export 两处且均已切到 session connection；另发现 2 条 merged markdown 标题期望与当前标题翻译行为不一致的旁路失败 | workflow / export / merged markdown |
 | 2026-03-20 | 验证 | 已在真实章节副本 `d1ff...` 上完成 review auto-followup + bilingual/review/merged export execute：open issues `12 -> 5`，`TERM_CONFLICT + STYLE_DRIFT` 已清空，导出成功，章节进入 `qa_checked` 且 `blocking_issue_count=0` | 真实章节验收 / workflow / export |
 | 2026-03-20 | 实现 | 根路径首页已重写为用户导向的 `Book Agent 译制台`，主路径收敛为上传书籍、启动整书转换、查看进度、下载中文结果与回看历史 | Web 产品入口 / FastAPI UI |
+| 2026-03-22 | 决策 | 已锁定 multi-agent Phase 1 边界，并新增 `docs/multi-agent-final-implementation-plan.md` 作为 repo-aligned 最终实施稿 | multi-agent 计划面 |
+| 2026-03-22 | 实现 | 已引入 `MemoryService + CompiledTranslationContext`，让翻译调用显式携带 `context_compile_version` 与 `memory_version_used` | translation / context / memory |
+| 2026-03-22 | 治理 | 已读取 `auto-pilot.md` 并将 multi-agent 升级切换到 autopilot 接手流程；当前执行起点锁定为 `MDU-8.1.1` | 根目录治理 / 进度面 |
+| 2026-03-22 | 实现 | 已为 packet 写入 `packet_ordinal + runtime_state + input_version_bundle`，并将 translate claim 规则改为显式 chapter-front 选择；新增“反向 work item 顺序仍只会 claim 章内 front packet”回归，当前执行已推进到 `MDU-8.1.2` | run control / context builder / packet runtime |
+| 2026-03-22 | 实现 | translate stage 已改为 frontier seeding：初次只 seed 每章 front packet，front packet 完成后才为该章补 seed 下一 packet；新增“只为未阻塞章节推进 frontier”回归，当前执行已推进到 `MDU-8.1.3` | run executor / chapter-lane control |
+| 2026-03-22 | 验证 | 已补 `retry/reclaim` 路径的 chapter serialization 回归：front packet 进入 `retryable_failed` 后，同章 follow-up packet 不会被 seed 或 claim，系统只会重试同一 front packet；Phase 8 因此收口完成，当前执行已切到 `MDU-9.1.1` | run executor / chapter-lane serialization |
+| 2026-03-22 | 实现 | 已将 `ALIGNMENT_FAILURE` 的 `REALIGN_ONLY / RERUN_PACKET` 决策收敛进 `rule_engine.resolve_action(...)`，`review.py` 不再保留分叉路由；同时校正“无 source sentence mapping 的 orphan target”集成预期为 `RERUN_PACKET` | review gate / action routing / alignment recovery |
 | 2026-03-20 | 验证 | 首页入口回归与 `bootstrap-upload + translate_full` API 主路径回归已通过，确认产品化界面未破坏现有后端工作流 | 前端入口 / API 工作流 |
 | 2026-03-21 | 修复 | 修复 Web 上传后立刻读取 document 的偶发 404：`bootstrap` / `bootstrap-upload` 现会在响应前显式提交事务，前端对新 document 同步增加短重试，并补 `test_bootstrap_upload_document_is_immediately_readable` 回归 | Web 产品入口 / API 一致性 |
 | 2026-03-21 | 修复 | history API 已补最新 run 阶段与进度字段，历史卡片改为“已入库/翻译中/复核中/可下载”等用户态文案，并在翻译阶段显示实时 packet 进度 | Web 产品入口 / 历史查询体验 |
@@ -257,3 +329,7 @@
 | 2026-03-21 | 验证 | 已在真实 packet `670447b0...` 上完成上下文收紧后的生产链路复测：当前默认 `role-style-v2` 下 `prev_translated_blocks 4 -> 0`、`token_in 1927 -> 1561`，输出从 `智能体式AI` 收敛为 `智能体AI`，且未再回退到抽象服务化尾句 | 真实翻译样本 / prompt 成本与质量复测 |
 | 2026-03-22 | 实现 | 已将系统默认翻译 prompt profile 从 `role-style-v2` 切换为 `role-style-faithful-v6`，并同步更新 `Settings`、`LLMTranslationWorker`、packet experiment 与 chapter smoke 的默认入口，避免默认链路分叉 | 翻译 prompt 默认配置 / 实验入口一致性 |
 | 2026-03-22 | 验证 | 已用真实 packet `670447b0...` 在新默认 `role-style-faithful-v6` 下复测：`prev_translated_blocks=0`、`relevant_terms` 已归一到 `Agentic AI => 智能体AI`，输出稳定为“长期稳定、周到地照应你”，未再回到“连贯性和关怀/贴心服务”式抽象尾句 | 真实翻译样本 / 新默认验收 |
+| 2026-03-22 | 修复 | `PdfProseArtifactRepairService.repair_mixed_code_prose_blocks(...)` 已改为基于真实 render blocks 扫描 mixed code/prose，而不是只看原始 block 文本；这样跨页代码在 render 阶段恢复出来的 `trailing/leading prose` 也能被补译并持久化回原 block | PDF prose artifact repair / render-time mixed code recovery |
+| 2026-03-22 | 验证 | 已对真实文档 `67283f52...` 从第 5 章到末章重跑 mixed-code prose repair + merged html/md re-export；Chapter 6/7/10/19 中原本泄漏到代码块后的英文正文已回填为中文，render residual 已收敛到仅剩 Glossary 的 2 个非章节块 | 真实 PDF 样本 / Chapter 5+ 跨页代码验收 |
+| 2026-03-22 | 修复 | EPUB merged export 现已为“非严格 XML 的章节 XHTML”补上 HTMLParser figure fallback：当 `ElementTree` 无法解析章节时，导出仍能从 `<figure>/<img>/<figcaption>` 里恢复图片路径，不再因为 `ParseError` 导致整章图片全部丢失 | EPUB exporter / image asset recovery / malformed XHTML fallback |
+| 2026-03-22 | 验证 | 已重导出真实 EPUB 文档 `cf32d839...`；`merged-document.html` 现在包含 44 个 `<img>` 标签，`artifacts/exports/cf32.../assets/` 下已实际落出 44 个图片文件，缺图问题已消除 | 真实 EPUB 样本 / merged HTML 图片验收 |

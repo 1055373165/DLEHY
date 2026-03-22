@@ -99,6 +99,17 @@ class RuleEngineTests(unittest.TestCase):
         )
         self.assertEqual(action, ActionType.REALIGN_ONLY)
 
+    def test_alignment_failure_routes_to_rerun_when_realign_would_be_lossy(self) -> None:
+        action = resolve_action(
+            IssueRoutingContext(
+                issue_type="ALIGNMENT_FAILURE",
+                root_cause_layer=RootCauseLayer.ALIGNMENT,
+                translation_content_ok=True,
+                requires_packet_rerun=True,
+            )
+        )
+        self.assertEqual(action, ActionType.RERUN_PACKET)
+
     def test_build_rerun_plan_includes_locked_term_override_for_term_conflict(self) -> None:
         now = datetime.now(timezone.utc)
         issue = ReviewIssue(

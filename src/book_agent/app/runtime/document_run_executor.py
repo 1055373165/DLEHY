@@ -22,11 +22,20 @@ from book_agent.domain.enums import (
     WorkItemStage,
     WorkItemStatus,
 )
-from book_agent.domain.models import Chapter
+from book_agent.domain.models import Block, Chapter
 from book_agent.domain.models.ops import DocumentRun, WorkItem
 from book_agent.domain.models.translation import TranslationPacket
 from book_agent.infra.db.session import session_scope
 from book_agent.infra.repositories.run_control import RunControlRepository
+from book_agent.orchestrator.state_machine import (
+    PACKET_RUNTIME_SUBSTATE_LEASED,
+    PACKET_RUNTIME_SUBSTATE_RETRYABLE_FAILED,
+    PACKET_RUNTIME_SUBSTATE_RUNNING,
+    PACKET_RUNTIME_SUBSTATE_TERMINAL_FAILED,
+    PACKET_RUNTIME_SUBSTATE_TRANSLATED,
+    build_packet_runtime_state,
+    packet_runtime_state,
+)
 from book_agent.services.run_control import RunControlService
 from book_agent.services.run_execution import ClaimedRunWorkItem, RunExecutionService
 from book_agent.services.workflows import DocumentWorkflowService
@@ -311,6 +320,21 @@ class DocumentRunExecutor:
         with session_scope(self.session_factory) as session:
             execution = self._run_execution_service(session)
             reclaimed = execution.reclaim_expired_leases(run_id=run_id)
+            if reclaimed.reclaimed_work_item_ids:
+                reclaimed_items = session.scalars(
+                    select(WorkItem).where(WorkItem.id.in_(reclaimed.reclaimed_work_item_ids))
+                ).all()
+                for item in reclaimed_items:
+                    if item.stage != WorkItemStage.TRANSLATE or item.scope_type != WorkItemScopeType.PACKET:
+                        continue
+                    self._update_translate_packet_runtime_state(
+                        session,
+                        packet_id=str(item.scope_id),
+                        substate=PACKET_RUNTIME_SUBSTATE_RETRYABLE_FAILED,
+                        run_id=run_id,
+                        work_item_id=item.id,
+                        attempt=item.attempt,
+                    )
         return reclaimed.expired_lease_count > 0
 
     def _process_translate_stage(self, run_id: str) -> bool:
@@ -320,8 +344,29 @@ class DocumentRunExecutor:
             run = repository.get_run(run_id)
             document_id = run.document_id
             translate_items = self._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            seeded_packet_ids = self._seed_translate_frontier_work_items(
+                session=session,
+                execution=execution,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=translate_items,
+            )
+            if seeded_packet_ids:
+                translate_items = self._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+                self._update_pipeline_stage(
+                    run_id,
+                    "translate",
+                    status="pending",
+                    extra={
+                        "total_packet_count": len(self._list_all_packet_ids(session, document_id)),
+                        "pending_packet_count": len(self._list_pending_packet_ids(session, document_id)),
+                    },
+                    current_stage="translate",
+                    session=session,
+                )
             if not translate_items:
                 packet_ids = self._list_pending_packet_ids(session, document_id)
+                current_stage = "translate" if packet_ids else "review"
                 execution.seed_translate_work_items(
                     run_id=run_id,
                     packet_ids=packet_ids,
@@ -335,7 +380,7 @@ class DocumentRunExecutor:
                         "total_packet_count": len(self._list_all_packet_ids(session, document_id)),
                         "pending_packet_count": len(packet_ids),
                     },
-                    current_stage=("translate" if packet_ids else "review"),
+                    current_stage=current_stage,
                     session=session,
                 )
                 return bool(packet_ids)
@@ -366,6 +411,30 @@ class DocumentRunExecutor:
         if translate_items and all(item.status == WorkItemStatus.SUCCEEDED for item in translate_items):
             self._update_pipeline_stage(run_id, "translate", status="succeeded", current_stage="review")
         return False
+
+    def _seed_translate_frontier_work_items(
+        self,
+        *,
+        session: Session,
+        execution: RunExecutionService,
+        run_id: str,
+        document_id: str,
+        translate_items: list[WorkItem],
+    ) -> list[str]:
+        packet_ids = self._list_seedable_translate_packet_ids(
+            session=session,
+            run_id=run_id,
+            document_id=document_id,
+            translate_items=translate_items,
+        )
+        if not packet_ids:
+            return []
+        execution.seed_translate_work_items(
+            run_id=run_id,
+            packet_ids=packet_ids,
+            input_version_bundle_by_packet_id=self._translate_input_versions(session, packet_ids),
+        )
+        return packet_ids
 
     def _process_review_stage(self, run_id: str) -> bool:
         with session_scope(self.session_factory) as session:
@@ -636,6 +705,18 @@ class DocumentRunExecutor:
                     lease_token=claimed.lease_token,
                     lease_seconds=lease_window_seconds,
                 )
+                if (
+                    claimed.stage == WorkItemStage.TRANSLATE.value
+                    and claimed.scope_type == WorkItemScopeType.PACKET.value
+                ):
+                    self._update_translate_packet_runtime_state(
+                        session,
+                        packet_id=claimed.scope_id,
+                        substate=PACKET_RUNTIME_SUBSTATE_RUNNING,
+                        run_id=run_id,
+                        work_item_id=claimed.work_item_id,
+                        attempt=claimed.attempt,
+                    )
             heartbeat_thread.start()
             payload = worker_fn()
             stop_event.set()
@@ -690,6 +771,11 @@ class DocumentRunExecutor:
                 cost_usd=float(payload["cost_usd"]),
                 latency_ms=int(payload["latency_ms"]),
             )
+            self._update_translate_packet_runtime_state(
+                session,
+                packet_id=str(payload["packet_id"]),
+                substate=PACKET_RUNTIME_SUBSTATE_TRANSLATED,
+            )
 
     def _complete_failure(
         self,
@@ -713,6 +799,22 @@ class DocumentRunExecutor:
                 error_detail_json=error_detail,
                 retryable=retryable,
             )
+            if (
+                claimed.stage == WorkItemStage.TRANSLATE.value
+                and claimed.scope_type == WorkItemScopeType.PACKET.value
+            ):
+                self._update_translate_packet_runtime_state(
+                    session,
+                    packet_id=claimed.scope_id,
+                    substate=(
+                        PACKET_RUNTIME_SUBSTATE_RETRYABLE_FAILED
+                        if retryable and pause_reason is None
+                        else PACKET_RUNTIME_SUBSTATE_TERMINAL_FAILED
+                    ),
+                    run_id=run_id,
+                    work_item_id=claimed.work_item_id,
+                    attempt=claimed.attempt,
+                )
             if pause_reason is not None:
                 control = self._run_control_service(session)
                 summary = control.pause_run_system(
@@ -772,11 +874,38 @@ class DocumentRunExecutor:
             ),
             key=lambda item: (item.priority, item.created_at, item.id),
         )
-        candidate_chapter_map = self._translate_item_chapter_id_map(session, candidate_items)
+        candidate_metadata = self._translate_item_lane_metadata_map(session, candidate_items)
+        chapter_frontier: dict[str, WorkItem] = {}
+        for item in candidate_items:
+            metadata = candidate_metadata.get(str(item.scope_id), {})
+            chapter_id = str(metadata.get("chapter_id") or "").strip()
+            if not chapter_id or chapter_id in active_chapter_ids:
+                continue
+            existing = chapter_frontier.get(chapter_id)
+            if existing is None:
+                chapter_frontier[chapter_id] = item
+                continue
+            if self._translate_item_lane_sort_key(item, metadata) < self._translate_item_lane_sort_key(
+                existing,
+                candidate_metadata.get(str(existing.scope_id), {}),
+            ):
+                chapter_frontier[chapter_id] = item
+        chapter_frontier_items = sorted(
+            chapter_frontier.values(),
+            key=lambda item: (
+                item.priority,
+                item.created_at,
+                self._translate_item_lane_sort_key(
+                    item,
+                    candidate_metadata.get(str(item.scope_id), {}),
+                ),
+                item.id,
+            ),
+        )
         reserved_chapter_ids = set(active_chapter_ids)
         claimed_items: list[ClaimedRunWorkItem] = []
-        for item in candidate_items:
-            chapter_id = candidate_chapter_map.get(item.scope_id)
+        for item in chapter_frontier_items:
+            chapter_id = str(candidate_metadata.get(str(item.scope_id), {}).get("chapter_id") or "").strip()
             if not chapter_id or chapter_id in reserved_chapter_ids:
                 continue
             claimed = execution.claim_work_item_by_id(
@@ -789,6 +918,14 @@ class DocumentRunExecutor:
                 continue
             claimed_items.append(claimed)
             reserved_chapter_ids.add(chapter_id)
+            self._update_translate_packet_runtime_state(
+                session,
+                packet_id=str(item.scope_id),
+                substate=PACKET_RUNTIME_SUBSTATE_LEASED,
+                run_id=run_id,
+                work_item_id=item.id,
+                attempt=claimed.attempt,
+            )
             if len(claimed_items) >= available_slots:
                 break
         return claimed_items
@@ -809,11 +946,19 @@ class DocumentRunExecutor:
         session: Session,
         packet_ids: list[str],
     ) -> dict[str, dict[str, Any]]:
-        chapter_map = self._packet_chapter_id_map(session, packet_ids)
+        packet_metadata = self._packet_lane_metadata_map(session, packet_ids)
         return {
             packet_id: {
                 "packet_id": packet_id,
-                **({"chapter_id": chapter_map[packet_id]} if packet_id in chapter_map else {}),
+                **(
+                    {
+                        "chapter_id": packet_metadata[packet_id]["chapter_id"],
+                        "packet_ordinal": packet_metadata[packet_id]["packet_ordinal"],
+                        "packet_runtime_substate": packet_metadata[packet_id].get("runtime_substate"),
+                    }
+                    if packet_id in packet_metadata
+                    else {}
+                ),
             }
             for packet_id in packet_ids
         }
@@ -823,33 +968,204 @@ class DocumentRunExecutor:
         session: Session,
         items: list[WorkItem],
     ) -> dict[str, str]:
+        return {
+            packet_id: str(metadata["chapter_id"])
+            for packet_id, metadata in self._translate_item_lane_metadata_map(session, items).items()
+            if metadata.get("chapter_id")
+        }
+
+    def _translate_item_lane_metadata_map(
+        self,
+        session: Session,
+        items: list[WorkItem],
+    ) -> dict[str, dict[str, Any]]:
         packet_ids_to_query: list[str] = []
-        chapter_map: dict[str, str] = {}
+        metadata_map: dict[str, dict[str, Any]] = {}
         for item in items:
             bundle = dict(item.input_version_bundle_json or {})
             chapter_id = bundle.get("chapter_id")
-            if chapter_id:
-                chapter_map[str(item.scope_id)] = str(chapter_id)
+            packet_ordinal = self._coerce_packet_ordinal(bundle.get("packet_ordinal"))
+            runtime_substate = str(bundle.get("packet_runtime_substate") or "").strip() or None
+            if chapter_id and packet_ordinal is not None:
+                metadata_map[str(item.scope_id)] = {
+                    "chapter_id": str(chapter_id),
+                    "packet_ordinal": packet_ordinal,
+                    "runtime_substate": runtime_substate,
+                }
             else:
                 packet_ids_to_query.append(str(item.scope_id))
         if packet_ids_to_query:
-            chapter_map.update(self._packet_chapter_id_map(session, packet_ids_to_query))
-        return chapter_map
+            metadata_map.update(self._packet_lane_metadata_map(session, packet_ids_to_query))
+        return metadata_map
 
     def _packet_chapter_id_map(
         self,
         session: Session,
         packet_ids: list[str],
     ) -> dict[str, str]:
+        return {
+            packet_id: str(metadata["chapter_id"])
+            for packet_id, metadata in self._packet_lane_metadata_map(session, packet_ids).items()
+            if metadata.get("chapter_id")
+        }
+
+    def _packet_lane_metadata_map(
+        self,
+        session: Session,
+        packet_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
         normalized_ids = [packet_id for packet_id in packet_ids if packet_id]
         if not normalized_ids:
             return {}
         rows = session.execute(
-            select(TranslationPacket.id, TranslationPacket.chapter_id).where(
-                TranslationPacket.id.in_(normalized_ids)
+            select(
+                TranslationPacket.id,
+                TranslationPacket.chapter_id,
+                TranslationPacket.packet_json,
+                Block.ordinal,
             )
+            .outerjoin(Block, Block.id == TranslationPacket.block_start_id)
+            .where(TranslationPacket.id.in_(normalized_ids))
         ).all()
-        return {str(packet_id): str(chapter_id) for packet_id, chapter_id in rows}
+        metadata: dict[str, dict[str, Any]] = {}
+        for packet_id, chapter_id, packet_json, block_ordinal in rows:
+            packet_payload = dict(packet_json or {})
+            input_bundle = packet_payload.get("input_version_bundle")
+            if not isinstance(input_bundle, dict):
+                input_bundle = {}
+            runtime = packet_runtime_state(packet_payload)
+            packet_ordinal = self._coerce_packet_ordinal(
+                input_bundle.get("packet_ordinal")
+                or packet_payload.get("packet_ordinal")
+                or runtime.get("packet_ordinal")
+                or block_ordinal
+            )
+            metadata[str(packet_id)] = {
+                "chapter_id": str(chapter_id),
+                "packet_ordinal": packet_ordinal if packet_ordinal is not None else 10**9,
+                "runtime_substate": str(runtime.get("substate") or "").strip() or None,
+            }
+        return metadata
+
+    def _list_seedable_translate_packet_ids(
+        self,
+        *,
+        session: Session,
+        run_id: str,
+        document_id: str,
+        translate_items: list[WorkItem] | None = None,
+    ) -> list[str]:
+        stage_items = translate_items if translate_items is not None else self._list_stage_items(
+            session,
+            run_id,
+            WorkItemStage.TRANSLATE,
+        )
+        chapter_blocking_items = [
+            item
+            for item in stage_items
+            if item.status in {
+                WorkItemStatus.PENDING,
+                WorkItemStatus.RETRYABLE_FAILED,
+                WorkItemStatus.LEASED,
+                WorkItemStatus.RUNNING,
+            }
+        ]
+        blocked_chapter_ids = set(self._translate_item_chapter_id_map(session, chapter_blocking_items).values())
+        represented_packet_ids = {str(item.scope_id) for item in stage_items}
+        candidate_packet_ids = self._list_pending_packet_ids(session, document_id)
+        if not candidate_packet_ids:
+            return []
+
+        candidate_metadata = self._packet_lane_metadata_map(session, candidate_packet_ids)
+        frontier_by_chapter: dict[str, str] = {}
+        for packet_id in candidate_packet_ids:
+            metadata = candidate_metadata.get(packet_id, {})
+            chapter_id = str(metadata.get("chapter_id") or "").strip()
+            if not chapter_id or chapter_id in blocked_chapter_ids or packet_id in represented_packet_ids:
+                continue
+            existing_packet_id = frontier_by_chapter.get(chapter_id)
+            if existing_packet_id is None:
+                frontier_by_chapter[chapter_id] = packet_id
+                continue
+            if self._packet_lane_sort_key(
+                packet_id,
+                candidate_metadata.get(packet_id, {}),
+            ) < self._packet_lane_sort_key(
+                existing_packet_id,
+                candidate_metadata.get(existing_packet_id, {}),
+            ):
+                frontier_by_chapter[chapter_id] = packet_id
+
+        return sorted(
+            frontier_by_chapter.values(),
+            key=lambda packet_id: self._packet_lane_sort_key(
+                packet_id,
+                candidate_metadata.get(packet_id, {}),
+            ),
+        )
+
+    def _packet_lane_sort_key(
+        self,
+        packet_id: str,
+        metadata: dict[str, Any],
+    ) -> tuple[int, str]:
+        packet_ordinal = self._coerce_packet_ordinal(metadata.get("packet_ordinal"))
+        return (
+            packet_ordinal if packet_ordinal is not None else 10**9,
+            str(packet_id),
+        )
+
+    def _translate_item_lane_sort_key(
+        self,
+        item: WorkItem,
+        metadata: dict[str, Any],
+    ) -> tuple[int, str, str]:
+        packet_ordinal = self._coerce_packet_ordinal(metadata.get("packet_ordinal"))
+        return (
+            packet_ordinal if packet_ordinal is not None else 10**9,
+            item.created_at.isoformat() if item.created_at is not None else "",
+            str(item.id),
+        )
+
+    def _coerce_packet_ordinal(self, value: Any) -> int | None:
+        try:
+            if value is None:
+                return None
+            ordinal = int(value)
+        except (TypeError, ValueError):
+            return None
+        return ordinal if ordinal >= 0 else None
+
+    def _update_translate_packet_runtime_state(
+        self,
+        session: Session,
+        *,
+        packet_id: str,
+        substate: str,
+        run_id: str | None = None,
+        work_item_id: str | None = None,
+        attempt: int | None = None,
+    ) -> None:
+        packet = session.get(TranslationPacket, packet_id)
+        if packet is None:
+            return
+        packet_json = dict(packet.packet_json or {})
+        existing_runtime = packet_runtime_state(packet_json)
+        packet_ordinal = self._coerce_packet_ordinal(
+            existing_runtime.get("packet_ordinal") or packet_json.get("packet_ordinal")
+        )
+        packet_json["runtime_state"] = build_packet_runtime_state(
+            substate=substate,
+            packet_ordinal=packet_ordinal,
+            run_id=run_id,
+            work_item_id=work_item_id,
+            attempt=attempt,
+            updated_at=_utcnow().isoformat(),
+        )
+        packet.packet_json = packet_json
+        packet.updated_at = _utcnow()
+        session.merge(packet)
+        session.flush()
 
     def _heartbeat_loop(self, *, lease_token: str, lease_seconds: int, stop_event: threading.Event) -> None:
         while not stop_event.wait(timeout=max(1, self.heartbeat_interval_seconds)):

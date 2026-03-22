@@ -8,7 +8,9 @@ import shutil
 import zipfile
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree as ET
 
 from book_agent.core.ids import stable_id
 from book_agent.domain.document_titles import (
@@ -36,6 +38,15 @@ from book_agent.domain.enums import (
     TargetSegmentStatus,
 )
 from book_agent.domain.models.review import Export, IssueAction, ReviewIssue
+from book_agent.domain.structure.epub import (
+    _element_class_tokens,
+    _figure_caption_text,
+    _figure_like_container,
+    _first_descendant,
+    _join_path,
+    _local_name,
+    _parse_xml_document,
+)
 from book_agent.domain.structure.pdf import (
     _expanded_code_candidate_lines,
     _looks_like_code,
@@ -66,6 +77,72 @@ class _PdfPageLayoutBlock:
     block_type: int | None
 
 
+class _FallbackEpubFigureIndexParser(HTMLParser):
+    def __init__(self, *, base_dir: str, path_normalizer) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_dir = base_dir
+        self.path_normalizer = path_normalizer
+        self.archive_path_by_caption_signature: dict[str, str] = {}
+        self._figure_stack: list[dict[str, object]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        local_tag = _local_name(tag).casefold()
+        attr_map = {str(key).lower(): value or "" for key, value in attrs}
+        if local_tag == "figure":
+            self._figure_stack.append({"src": None, "caption_parts": [], "figcaption_depth": 0})
+            return
+        if not self._figure_stack:
+            return
+        current = self._figure_stack[-1]
+        if local_tag == "img" and not current.get("src"):
+            src = str(attr_map.get("src") or "").strip()
+            if src:
+                current["src"] = src
+            return
+        if local_tag == "figcaption":
+            current["figcaption_depth"] = int(current.get("figcaption_depth") or 0) + 1
+            return
+        if local_tag == "br" and int(current.get("figcaption_depth") or 0) > 0:
+            caption_parts = current.get("caption_parts")
+            if isinstance(caption_parts, list):
+                caption_parts.append(" ")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        local_tag = _local_name(tag).casefold()
+        if not self._figure_stack:
+            return
+        current = self._figure_stack[-1]
+        if local_tag == "figcaption":
+            current["figcaption_depth"] = max(int(current.get("figcaption_depth") or 0) - 1, 0)
+            return
+        if local_tag != "figure":
+            return
+        figure = self._figure_stack.pop()
+        src = str(figure.get("src") or "").strip()
+        caption_parts = figure.get("caption_parts")
+        caption_text = _normalize_render_text("".join(caption_parts)) if isinstance(caption_parts, list) else ""
+        caption_signature = _normalize_figure_caption_signature(caption_text)
+        if not src or not caption_signature:
+            return
+        archive_path = self.path_normalizer(_join_path(self.base_dir, src))
+        if archive_path is None:
+            return
+        self.archive_path_by_caption_signature.setdefault(caption_signature, archive_path)
+
+    def handle_data(self, data: str) -> None:
+        if not self._figure_stack:
+            return
+        current = self._figure_stack[-1]
+        if int(current.get("figcaption_depth") or 0) <= 0:
+            return
+        caption_parts = current.get("caption_parts")
+        if isinstance(caption_parts, list):
+            caption_parts.append(data)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -84,6 +161,10 @@ def _normalize_render_text(text: str | None) -> str:
 
 def _normalize_signature_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip().casefold()
+
+
+def _normalize_figure_caption_signature(text: str) -> str:
+    return re.sub(r"\s+", "", (text or "")).strip().casefold()
 
 
 def _leading_whitespace_width(text: str) -> int:
@@ -375,6 +456,34 @@ _SINGLE_LINE_CODEISH_PATTERN = re.compile(
     r")",
     re.IGNORECASE,
 )
+_GLOSSARY_DEFINITION_LINE_PATTERN = re.compile(
+    r"^(?P<label>[A-Za-z][A-Za-z0-9/&'(). -]{0,80}?):\s+(?P<body>.+)$"
+)
+_GLOSSARY_CODEISH_LABEL_STARTERS = {
+    "async",
+    "await",
+    "break",
+    "case",
+    "class",
+    "continue",
+    "def",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "if",
+    "import",
+    "match",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
+}
 
 
 @dataclass(slots=True)
@@ -3398,6 +3507,63 @@ class ExportService:
             return False
         return sentence_punctuation >= 2 or sentence_like_lines >= 4
 
+    def _looks_like_glossary_definition_line(self, text: str) -> bool:
+        normalized = _normalize_render_text(text)
+        if not normalized or len(normalized) > 260:
+            return False
+        if _looks_like_labeled_prose_line(normalized):
+            return True
+        if any(marker in normalized for marker in ("{", "}", "[", "]", "=>", "::", "->", "`")):
+            return False
+        if _looks_like_shell_command_line(normalized):
+            return False
+        if _CODE_ASSIGNMENT_PATTERN.match(normalized) or _OCR_TOLERANT_CODE_ASSIGNMENT_PATTERN.match(normalized):
+            return False
+        match = _GLOSSARY_DEFINITION_LINE_PATTERN.match(normalized)
+        if match is None:
+            return False
+        label = re.sub(r"\s+", " ", match.group("label")).strip().casefold()
+        if not label:
+            return False
+        if label.split(" ", 1)[0] in _GLOSSARY_CODEISH_LABEL_STARTERS:
+            return False
+        body = match.group("body").strip()
+        if not body:
+            return False
+        body_tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", body.casefold())
+        if len(body_tokens) < 4:
+            return False
+        stopword_hits = sum(1 for token in body_tokens if token in _PROSE_ARTIFACT_STOPWORDS)
+        return stopword_hits >= max(1, len(body_tokens) // 5)
+
+    def _looks_like_glossary_definition_text(self, text: str) -> bool:
+        lines = [line.strip() for line in _expanded_code_candidate_lines(text or "") if line.strip()]
+        if len(lines) < 2:
+            return False
+        if any(
+            line.startswith(("#", "@"))
+            or _looks_like_shell_command_line(line)
+            or _CODE_ASSIGNMENT_PATTERN.match(line)
+            or _OCR_TOLERANT_CODE_ASSIGNMENT_PATTERN.match(line)
+            for line in lines[:12]
+        ):
+            return False
+        label_indexes = [index for index, line in enumerate(lines[:12]) if self._looks_like_glossary_definition_line(line)]
+        if not label_indexes:
+            return False
+        if label_indexes[0] != 0:
+            return False
+        for current_index, next_index in zip(label_indexes, [*label_indexes[1:], len(lines)]):
+            segment_lines = lines[current_index:next_index]
+            continuation_lines = segment_lines[1:]
+            if continuation_lines:
+                segment_body = re.sub(r"^[^:]+:\s*", "", " ".join(segment_lines), count=1)
+                if not _looks_like_sentence_prose_line(segment_body):
+                    return False
+            elif not self._looks_like_glossary_definition_line(segment_lines[0]):
+                return False
+        return True
+
     def _looks_like_codeish_line_for_artifact_rejection(self, line: str) -> bool:
         stripped = (line or "").strip()
         if not stripped or _LIST_MARKER_PATTERN.match(stripped) or _ORDERED_LIST_MARKER_PATTERN.match(stripped):
@@ -3602,6 +3768,42 @@ class ExportService:
             metadata["pdf_mixed_code_prose_split"] = split_kind
             return metadata
 
+        def _persisted_split_target(split_kind: str, source_text: str) -> tuple[str | None, list[str]]:
+            repairs = block.source_metadata.get("mixed_code_prose_repair_targets")
+            if not isinstance(repairs, list):
+                return None, []
+            source_signature = _normalize_signature_text(source_text)
+            for repair in repairs:
+                if not isinstance(repair, dict):
+                    continue
+                if str(repair.get("split_kind") or "").strip() != split_kind:
+                    continue
+                if str(repair.get("source_signature") or "").strip() != source_signature:
+                    continue
+                target_text = str(repair.get("target_text") or "").strip() or None
+                if target_text is None:
+                    continue
+                target_segment_ids = [str(item) for item in list(repair.get("target_segment_ids") or []) if str(item)]
+                return target_text, target_segment_ids
+            return None, []
+
+        prose_target_text = str(block.target_text or "").strip() or None
+        prose_target_ids = list(block.target_segment_ids) if prose_target_text else []
+        leading_target_text = prose_target_text if leading_lines and not trailing_lines else None
+        trailing_target_text = prose_target_text if trailing_lines and not leading_lines else None
+        leading_target_ids = prose_target_ids if leading_target_text else []
+        trailing_target_ids = prose_target_ids if trailing_target_text else []
+        if leading_lines and leading_target_text is None:
+            leading_target_text, leading_target_ids = _persisted_split_target(
+                "leading_prose_prefix",
+                "\n".join(leading_lines),
+            )
+        if trailing_lines and trailing_target_text is None:
+            trailing_target_text, trailing_target_ids = _persisted_split_target(
+                "trailing_prose_suffix",
+                "\n".join(trailing_lines),
+            )
+
         fragments: list[MergedRenderBlock] = []
         if leading_lines:
             fragments.append(
@@ -3612,8 +3814,9 @@ class ExportService:
                     render_mode="zh_primary_with_optional_source",
                     artifact_kind=None,
                     source_text="\n".join(leading_lines),
-                    target_text=None,
+                    target_text=leading_target_text,
                     source_metadata=_derived_metadata("body", "leading_prose_prefix"),
+                    target_segment_ids=leading_target_ids,
                     is_expected_source_only=False,
                     notice=None,
                 )
@@ -3622,7 +3825,9 @@ class ExportService:
             replace(
                 block,
                 source_text="\n".join(code_lines),
+                target_text=None,
                 source_metadata=_derived_metadata("code_like", "embedded_code_span"),
+                target_segment_ids=[],
             )
         )
         if trailing_lines:
@@ -3634,13 +3839,176 @@ class ExportService:
                     render_mode="zh_primary_with_optional_source",
                     artifact_kind=None,
                     source_text="\n".join(trailing_lines),
-                    target_text=None,
+                    target_text=trailing_target_text,
                     source_metadata=_derived_metadata("body", "trailing_prose_suffix"),
+                    target_segment_ids=trailing_target_ids,
                     is_expected_source_only=False,
                     notice=None,
                 )
             )
         return fragments
+
+    def _looks_like_refresh_split_code_prefix_terminal_line(
+        self,
+        line: str,
+        previous_lines: list[str],
+    ) -> bool:
+        if (
+            _looks_like_embedded_code_line(line)
+            or _looks_like_code_docstring_line(line)
+            or _looks_like_code_continuation_line(line, previous_lines)
+        ):
+            return True
+        if _looks_like_prose_line_group([line]):
+            return False
+        candidate_lines = [*previous_lines, line]
+        return _looks_like_code("\n".join(candidate_lines), max(2, len(candidate_lines)))
+
+    def _looks_like_refresh_split_prose_onset(self, lines: list[str]) -> bool:
+        if not lines:
+            return False
+        first_line = lines[0]
+        if _looks_like_sentence_prose_line(first_line):
+            return True
+        if self._looks_like_refresh_split_code_start_line(first_line):
+            return False
+        if self._looks_like_codeish_line_for_artifact_rejection(first_line):
+            return False
+        window_limit = min(3, len(lines))
+        for window in range(2, window_limit + 1):
+            if _looks_like_prose_line_group(lines[:window]):
+                return True
+        return False
+
+    def _looks_like_refresh_split_code_start_line(self, line: str) -> bool:
+        stripped = (line or "").strip()
+        if not stripped:
+            return False
+        if self._looks_like_refresh_split_code_prefix_terminal_line(stripped, []):
+            return True
+        if re.match(r"^(?:await|return|yield|raise|break|continue)\b", stripped):
+            return True
+        if re.match(r"^[\]\)\}]\s*,?\s*$", stripped):
+            return True
+        if re.match(r"^[A-Za-z_][\w.]*\([^)]*\)\s*$", stripped):
+            return True
+        return False
+
+    def _refresh_split_fragment_target_matches_prose_text(
+        self,
+        fragment: dict[str, object],
+        prose_text: str,
+    ) -> bool:
+        if not prose_text:
+            return False
+        target_text = (
+            str(fragment.get("target_text") or "").strip()
+            or str(fragment.get("repair_target_text") or "").strip()
+        )
+        if not target_text:
+            return False
+        current_signature = _normalize_signature_text(prose_text)
+        stored_signature = str(fragment.get("repair_source_signature") or "").strip()
+        if stored_signature:
+            return stored_signature == current_signature
+        raw_source = str(fragment.get("source_text") or "").strip()
+        return _normalize_signature_text(raw_source) == current_signature
+
+    def _split_leading_code_prefix_from_refresh_fragment(
+        self,
+        block: MergedRenderBlock,
+        fragment: dict[str, object],
+    ) -> tuple[str, str] | None:
+        raw_block_type = str(fragment.get("block_type") or BlockType.PARAGRAPH.value).strip().casefold()
+        if raw_block_type != BlockType.PARAGRAPH.value:
+            return None
+        fragment_source = str(fragment.get("source_text") or "")
+        fragment_lines = _expanded_code_candidate_lines(fragment_source)
+        if len(fragment_lines) < 2:
+            return None
+        previous_lines = _expanded_code_candidate_lines(block.source_text or "")
+        if not previous_lines:
+            return None
+        if (
+            raw_block_type == BlockType.PARAGRAPH.value
+            and self._looks_like_refresh_split_prose_onset(fragment_lines)
+            and not self._looks_like_refresh_split_code_start_line(fragment_lines[0])
+        ):
+            return None
+        lookahead_limit = min(8, len(fragment_lines))
+        has_leading_code_prefix = any(
+            self._looks_like_refresh_split_code_prefix_terminal_line(
+                fragment_lines[index],
+                [*previous_lines, *fragment_lines[:index]],
+            )
+            or self._looks_like_refresh_split_code_start_line(fragment_lines[index])
+            for index in range(lookahead_limit)
+        )
+        if not has_leading_code_prefix:
+            return None
+
+        for split_index in range(1, len(fragment_lines)):
+            prefix_lines = fragment_lines[:split_index]
+            remainder_lines = fragment_lines[split_index:]
+            if not remainder_lines or not self._looks_like_refresh_split_prose_onset(remainder_lines):
+                continue
+            if not self._looks_like_refresh_split_code_prefix_terminal_line(
+                prefix_lines[-1],
+                [*previous_lines, *prefix_lines[:-1]],
+            ):
+                continue
+            merged_lines = [*previous_lines, *prefix_lines]
+            if not _looks_like_code("\n".join(merged_lines), max(2, len(merged_lines))):
+                continue
+            code_prefix = "\n".join(prefix_lines).strip()
+            prose_suffix = "\n".join(remainder_lines).strip()
+            if code_prefix and prose_suffix:
+                return code_prefix, prose_suffix
+        return None
+
+    def _extract_refresh_split_fragment_prose_text(
+        self,
+        block: MergedRenderBlock,
+        fragment: dict[str, object],
+    ) -> str | None:
+        fragment_source = str(fragment.get("source_text") or "")
+        if not fragment_source.strip():
+            return None
+        raw_block_type = str(fragment.get("block_type") or BlockType.PARAGRAPH.value).strip().casefold()
+        fragment_lines = _expanded_code_candidate_lines(fragment_source)
+        if not fragment_lines:
+            return None
+        split_prefix = self._split_leading_code_prefix_from_refresh_fragment(block, fragment)
+        if split_prefix is not None:
+            _, prose_suffix = split_prefix
+            return prose_suffix or None
+
+        if raw_block_type == BlockType.PARAGRAPH.value and _looks_like_prose_line_group(fragment_lines):
+            return fragment_source.strip()
+
+        if raw_block_type != BlockType.CODE.value:
+            return None
+
+        fragment_block = replace(
+            block,
+            block_id=f"{block.block_id}::refresh-fragment-prose-scan",
+            block_type=BlockType.CODE.value,
+            render_mode="source_artifact_full_width",
+            artifact_kind="code",
+            source_text=fragment_source,
+            target_text=None,
+            source_metadata=dict(fragment.get("source_metadata") or {}),
+            source_sentence_ids=[],
+            target_segment_ids=[],
+            is_expected_source_only=True,
+            notice="代码保持原样",
+        )
+        split_blocks = self._split_mixed_book_code_prose_render_block(fragment_block)
+        prose_blocks = [candidate for candidate in split_blocks if candidate.block_type == BlockType.PARAGRAPH.value]
+        code_blocks = [candidate for candidate in split_blocks if candidate.block_type == BlockType.CODE.value]
+        if len(prose_blocks) != 1 or not code_blocks:
+            return None
+        return (prose_blocks[0].source_text or "").strip() or None
 
     def _restore_bad_refresh_split_render_block(
         self,
@@ -3660,10 +4028,54 @@ class ExportService:
         if self._should_restore_labeled_prose_refresh_split(block, first_fragment):
             return [self._restore_labeled_prose_refresh_split(block, first_fragment)]
 
+        split_prefix = self._split_leading_code_prefix_from_refresh_fragment(block, first_fragment)
+        if split_prefix is not None:
+            code_prefix, prose_suffix = split_prefix
+            restored_block = self._restore_code_refresh_split(
+                block,
+                {**first_fragment, "source_text": code_prefix},
+            )
+            remaining_fragments: list[object] = []
+            refreshed_fragment = dict(first_fragment)
+            refreshed_fragment["source_text"] = prose_suffix
+            refreshed_fragment["block_type"] = BlockType.PARAGRAPH.value
+            refreshed_fragment_metadata = dict(refreshed_fragment.get("source_metadata") or {})
+            refreshed_recovery_flags = list(refreshed_fragment_metadata.get("recovery_flags") or [])
+            refreshed_fragment_metadata["recovery_flags"] = list(
+                dict.fromkeys([*refreshed_recovery_flags, "export_refresh_split_code_prefix_trimmed"])
+            )
+            refreshed_fragment_metadata["pdf_block_role"] = "body"
+            refreshed_fragment["source_metadata"] = refreshed_fragment_metadata
+            if self._refresh_split_fragment_target_matches_prose_text(first_fragment, prose_suffix):
+                refreshed_fragment["repair_source_signature"] = _normalize_signature_text(prose_suffix)
+            else:
+                refreshed_fragment.pop("target_text", None)
+                refreshed_fragment.pop("repair_target_text", None)
+                refreshed_fragment.pop("repair_source_signature", None)
+            remaining_fragments.append(refreshed_fragment)
+            remaining_fragments.extend(raw_fragments[1:])
+            restored_metadata = dict(restored_block.source_metadata)
+            restored_metadata["refresh_split_render_fragments"] = remaining_fragments
+            refreshed_block = replace(restored_block, source_metadata=restored_metadata)
+            resplit_refreshed = self._split_mixed_book_code_prose_render_block(refreshed_block)
+            if len(resplit_refreshed) != 1 or resplit_refreshed[0].block_id != refreshed_block.block_id:
+                return resplit_refreshed
+            return self._append_refreshed_split_render_fragments(refreshed_block)
+
         if not self._should_restore_code_refresh_split(block, first_fragment):
             return None
 
         restored_block = self._restore_code_refresh_split(block, first_fragment)
+        restored_prose_text = self._extract_refresh_split_fragment_prose_text(block, first_fragment) or ""
+        restored_target_text = None
+        if self._refresh_split_fragment_target_matches_prose_text(first_fragment, restored_prose_text):
+            restored_target_text = (
+                str(first_fragment.get("target_text") or "").strip()
+                or str(first_fragment.get("repair_target_text") or "").strip()
+                or None
+            )
+        if restored_target_text:
+            restored_block = replace(restored_block, target_text=restored_target_text, target_segment_ids=[])
         resplit_restored = self._split_mixed_book_code_prose_render_block(restored_block)
         if len(raw_fragments) == 1:
             if len(resplit_restored) != 1 or resplit_restored[0].block_id != restored_block.block_id:
@@ -3860,10 +4272,8 @@ class ExportService:
         if not parent_target or not _CJK_CHAR_PATTERN.search(parent_target):
             return None
         parent_source = str(parent_block.source_text or "").strip()
-        fragment_source = str(fragment.get("source_text") or "").strip()
+        fragment_source = self._extract_refresh_split_fragment_prose_text(parent_block, fragment)
         if not parent_source or not fragment_source:
-            return None
-        if not _looks_like_prose_line_group(_expanded_code_candidate_lines(fragment_source)):
             return None
         if not _looks_like_shell_command_line(parent_source.splitlines()[0]):
             return None
@@ -5357,6 +5767,8 @@ class ExportService:
             return False
         if self._looks_like_reference_listing_text(text):
             return False
+        if self._looks_like_glossary_definition_text(text):
+            return False
         if self._looks_like_wrapped_prose_artifact_text(text):
             return False
         if academic_paper and (
@@ -5419,6 +5831,8 @@ class ExportService:
         if not normalized or len(normalized) > 260:
             return False
         if self._looks_like_book_structural_heading_text(normalized):
+            return False
+        if self._looks_like_glossary_definition_line(normalized):
             return False
         if self._looks_like_structured_output_intro_prose_line(normalized):
             return False
@@ -5970,18 +6384,25 @@ class ExportService:
             return {}
 
         archive_path_by_block_id: dict[str, str] = {}
-        for block in render_blocks:
-            archive_path = self._safe_epub_archive_path(block.source_metadata.get("image_path"))
-            if archive_path is None:
-                continue
-            archive_path_by_block_id[block.block_id] = archive_path
-        if not archive_path_by_block_id:
-            return {}
-
         asset_root = output_dir / "assets"
         asset_root.mkdir(parents=True, exist_ok=True)
         relative_path_by_archive_path: dict[str, str] = {}
         with zipfile.ZipFile(epub_path) as archive:
+            legacy_figure_index_cache: dict[str, dict[str, str]] = {}
+            for block in render_blocks:
+                archive_path = self._safe_epub_archive_path(block.source_metadata.get("image_path"))
+                if archive_path is None:
+                    archive_path = self._recover_legacy_epub_figure_archive_path(
+                        block,
+                        archive,
+                        cache=legacy_figure_index_cache,
+                    )
+                if archive_path is None:
+                    continue
+                archive_path_by_block_id[block.block_id] = archive_path
+            if not archive_path_by_block_id:
+                return {}
+
             for archive_path in sorted(set(archive_path_by_block_id.values())):
                 try:
                     archive_info = archive.getinfo(archive_path)
@@ -5999,6 +6420,90 @@ class ExportService:
             block_id: relative_path_by_archive_path[archive_path]
             for block_id, archive_path in archive_path_by_block_id.items()
             if archive_path in relative_path_by_archive_path
+        }
+
+    def _recover_legacy_epub_figure_archive_path(
+        self,
+        block: MergedRenderBlock,
+        archive: zipfile.ZipFile,
+        *,
+        cache: dict[str, dict[str, str]],
+    ) -> str | None:
+        if block.artifact_kind not in {"image", "figure"}:
+            return None
+        chapter_path = self._safe_epub_archive_path(
+            block.source_metadata.get("source_path")
+            or block.source_metadata.get("href")
+        )
+        if chapter_path is None:
+            return None
+        caption_signature = _normalize_figure_caption_signature(block.source_text or "")
+        if not caption_signature:
+            return None
+        figure_index = cache.get(chapter_path)
+        if figure_index is None:
+            figure_index = self._index_epub_figure_archive_paths(archive, chapter_path)
+            cache[chapter_path] = figure_index
+        return figure_index.get(caption_signature)
+
+    def _index_epub_figure_archive_paths(
+        self,
+        archive: zipfile.ZipFile,
+        chapter_path: str,
+    ) -> dict[str, str]:
+        try:
+            raw = archive.read(chapter_path)
+            root = _parse_xml_document(raw)
+        except (KeyError, ET.ParseError, UnicodeDecodeError):
+            return self._index_epub_figure_archive_paths_from_html(
+                archive,
+                chapter_path,
+                raw if "raw" in locals() else None,
+            )
+
+        base_dir = posixpath.dirname(chapter_path)
+        archive_path_by_caption_signature: dict[str, str] = {}
+        for element in root.iter():
+            local_name = _local_name(element.tag)
+            class_tokens = _element_class_tokens(element)
+            if not _figure_like_container(local_name, class_tokens, element):
+                continue
+            image = _first_descendant(element, {"img"})
+            if image is None:
+                continue
+            image_src = str(image.attrib.get("src") or "").strip()
+            if not image_src:
+                continue
+            archive_path = self._safe_epub_archive_path(_join_path(base_dir, image_src))
+            if archive_path is None:
+                continue
+            caption_text = _figure_caption_text(element)
+            caption_signature = _normalize_figure_caption_signature(caption_text)
+            if not caption_signature:
+                continue
+            archive_path_by_caption_signature.setdefault(caption_signature, archive_path)
+        return archive_path_by_caption_signature
+
+    def _index_epub_figure_archive_paths_from_html(
+        self,
+        archive: zipfile.ZipFile,
+        chapter_path: str,
+        raw: bytes | None = None,
+    ) -> dict[str, str]:
+        try:
+            html_text = (raw if raw is not None else archive.read(chapter_path)).decode("utf-8", errors="replace")
+        except KeyError:
+            return {}
+        parser = _FallbackEpubFigureIndexParser(
+            base_dir=posixpath.dirname(chapter_path),
+            path_normalizer=self._safe_epub_archive_path,
+        )
+        parser.feed(html_text)
+        parser.close()
+        return {
+            caption_signature: archive_path
+            for caption_signature, archive_path in parser.archive_path_by_caption_signature.items()
+            if archive_path in archive.namelist()
         }
 
     def _export_pdf_assets(

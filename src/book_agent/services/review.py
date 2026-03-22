@@ -1751,17 +1751,13 @@ class ReviewService:
         )
 
     def _build_action(self, issue: ReviewIssue) -> IssueAction:
-        action_type = (
-            ActionType.RERUN_PACKET
-            if issue.issue_type == "ALIGNMENT_FAILURE"
-            and bool((issue.evidence_json or {}).get("requires_packet_rerun"))
-            else resolve_action(
-                IssueRoutingContext(
-                    issue_type=issue.issue_type,
-                    root_cause_layer=issue.root_cause_layer,
-                    involves_locked_term=issue.issue_type == "TERM_CONFLICT",
-                    translation_content_ok=issue.issue_type != "OMISSION",
-                )
+        action_type = resolve_action(
+            IssueRoutingContext(
+                issue_type=issue.issue_type,
+                root_cause_layer=issue.root_cause_layer,
+                involves_locked_term=issue.issue_type == "TERM_CONFLICT",
+                translation_content_ok=issue.issue_type != "OMISSION",
+                requires_packet_rerun=bool((issue.evidence_json or {}).get("requires_packet_rerun")),
             )
         )
         scope_type, scope_id = self._scope_for_action(issue, action_type)

@@ -65,6 +65,8 @@ _KNOWN_HTML_TAGS = {
     "tr",
     "td",
     "th",
+    "colgroup",
+    "col",
     "br",
     "hr",
     "dl",
@@ -232,6 +234,8 @@ class _FallbackHTMLBlockExtractor(HTMLParser):
 
         attr_map = {key.lower(): (value or "") for key, value in attrs}
         if tag not in _KNOWN_HTML_TAGS:
+            if self._active_block is not None and str(self._active_block.get("block_type")) == "table":
+                return
             self._append_text(self.get_starttag_text() or f"<{tag}>")
             return
 
@@ -249,10 +253,26 @@ class _FallbackHTMLBlockExtractor(HTMLParser):
                 metadata["image_alt"] = alt
             return
 
+        if self._active_block is not None and str(self._active_block.get("block_type")) == "table":
+            if tag == "tr":
+                self._active_block["current_row"] = []
+                self._active_block["current_cell"] = None
+                return
+            if tag in {"th", "td"}:
+                self._active_block["current_cell"] = []
+                return
+            if tag == "br":
+                current_cell = self._active_block.get("current_cell")
+                if isinstance(current_cell, list):
+                    current_cell.append("\n")
+                return
+            if tag in {"colgroup", "col", "thead", "tbody", "tfoot"}:
+                return
+
         if self._active_block is None:
             block_type = _block_type_for_html(tag, attr_map)
             if block_type:
-                self._active_block = {
+                active_block = {
                     "tag": tag,
                     "block_type": block_type,
                     "anchor": attr_map.get("id"),
@@ -260,6 +280,11 @@ class _FallbackHTMLBlockExtractor(HTMLParser):
                     "text_parts": [],
                     "source_path": self.href,
                 }
+                if block_type == "table":
+                    active_block["rows"] = []
+                    active_block["current_row"] = None
+                    active_block["current_cell"] = None
+                self._active_block = active_block
                 return
 
         if tag == "br":
@@ -279,13 +304,40 @@ class _FallbackHTMLBlockExtractor(HTMLParser):
         if not self._inside_content():
             return
         if tag not in _KNOWN_HTML_TAGS:
+            if self._active_block is not None and str(self._active_block.get("block_type")) == "table":
+                return
             self._append_text(f"</{tag}>")
             return
+        if self._active_block is not None and str(self._active_block.get("block_type")) == "table":
+            if tag in {"th", "td"}:
+                current_cell = self._active_block.get("current_cell")
+                current_row = self._active_block.get("current_row")
+                if isinstance(current_cell, list) and isinstance(current_row, list):
+                    cell_text = _normalize_text("".join(current_cell))
+                    if cell_text:
+                        current_row.append(cell_text)
+                self._active_block["current_cell"] = None
+                return
+            if tag == "tr":
+                current_row = self._active_block.get("current_row")
+                rows = self._active_block.get("rows")
+                if isinstance(current_row, list) and isinstance(rows, list) and current_row:
+                    rows.append(current_row)
+                self._active_block["current_row"] = None
+                self._active_block["current_cell"] = None
+                return
+            if tag in {"colgroup", "col", "thead", "tbody", "tfoot"}:
+                return
         if self._active_block is not None and self._active_block["tag"] == tag:
             self._finalize_active_block()
 
     def handle_data(self, data: str) -> None:
         if not self._inside_content():
+            return
+        if self._active_block is not None and str(self._active_block.get("block_type")) == "table":
+            current_cell = self._active_block.get("current_cell")
+            if isinstance(current_cell, list):
+                current_cell.append(data)
             return
         self._append_text(data)
 
@@ -305,8 +357,23 @@ class _FallbackHTMLBlockExtractor(HTMLParser):
         text_parts = self._active_block["text_parts"]
         assert isinstance(text_parts, list)
         block_type = str(self._active_block["block_type"])
-        raw_text = "".join(text_parts)
-        text = _normalize_preformatted_text(raw_text) if block_type == "code" else _normalize_text(raw_text)
+        if block_type == "table":
+            current_cell = self._active_block.get("current_cell")
+            current_row = self._active_block.get("current_row")
+            rows = self._active_block.get("rows")
+            if isinstance(current_cell, list) and isinstance(current_row, list):
+                cell_text = _normalize_text("".join(current_cell))
+                if cell_text:
+                    current_row.append(cell_text)
+                self._active_block["current_cell"] = None
+            if isinstance(current_row, list) and isinstance(rows, list) and current_row:
+                rows.append(current_row)
+                self._active_block["current_row"] = None
+            raw_rows = rows if isinstance(rows, list) else []
+            text = "\n".join(" | ".join(cell for cell in row if cell) for row in raw_rows if row)
+        else:
+            raw_text = "".join(text_parts)
+            text = _normalize_preformatted_text(raw_text) if block_type == "code" else _normalize_text(raw_text)
         metadata = dict(self._active_block["metadata"])
         if not text and metadata.get("image_alt"):
             _mark_image_only_metadata_nontranslatable(metadata)

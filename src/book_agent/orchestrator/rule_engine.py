@@ -9,6 +9,7 @@ class IssueRoutingContext:
     root_cause_layer: RootCauseLayer
     involves_locked_term: bool = False
     translation_content_ok: bool = False
+    requires_packet_rerun: bool = False
 
 
 def resolve_action(context: IssueRoutingContext) -> ActionType:
@@ -44,8 +45,12 @@ def resolve_action(context: IssueRoutingContext) -> ActionType:
         return ActionType.RERUN_PACKET
     if context.issue_type == "MISTRANSLATION_REFERENCE":
         return ActionType.REBUILD_PACKET_THEN_RERUN
-    if context.issue_type == "ALIGNMENT_FAILURE" and context.translation_content_ok:
-        return ActionType.REALIGN_ONLY
+    if context.issue_type == "ALIGNMENT_FAILURE":
+        if context.requires_packet_rerun:
+            return ActionType.RERUN_PACKET
+        if context.translation_content_ok:
+            return ActionType.REALIGN_ONLY
+        return ActionType.RERUN_PACKET
     if context.issue_type == "EXPORT_FAILURE":
         return ActionType.REEXPORT_ONLY
     if context.issue_type in {"OMISSION", "MISTRANSLATION_SEMANTIC", "MISTRANSLATION_LOGIC"}:

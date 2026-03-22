@@ -401,6 +401,7 @@ class ContextPacketBuilder:
             if not translatable_blocks:
                 continue
             chapter_brief = briefs_by_scope[chapter.id]
+            packet_ordinal = 0
             for start_index, end_index, current_group in self._block_groups(translatable_blocks, sentences_by_block):
                 prev_blocks = translatable_blocks[max(0, start_index - 2):start_index]
                 next_blocks = translatable_blocks[end_index + 1:end_index + 3]
@@ -430,6 +431,7 @@ class ContextPacketBuilder:
                                 sentence.normalized_text or sentence.source_text
                                 for sentence in sentence_window
                             )
+                        packet_ordinal += 1
                         packet, packet_maps = self._build_packet(
                             document=document,
                             chapter=chapter,
@@ -443,6 +445,7 @@ class ContextPacketBuilder:
                             entity_snapshot=entity_snapshot,
                             now=now,
                             packet_id=packet_id,
+                            packet_ordinal=packet_ordinal,
                             current_sentences=sentence_window,
                             current_block_text=current_block_text,
                         )
@@ -450,6 +453,7 @@ class ContextPacketBuilder:
                         maps.extend(packet_maps)
                     continue
 
+                packet_ordinal += 1
                 packet, packet_maps = self._build_merged_packet(
                     document=document,
                     chapter=chapter,
@@ -462,6 +466,7 @@ class ContextPacketBuilder:
                     termbase_snapshot=termbase_snapshot,
                     entity_snapshot=entity_snapshot,
                     now=now,
+                    packet_ordinal=packet_ordinal,
                 )
                 packets.append(packet)
                 maps.extend(packet_maps)
@@ -554,6 +559,7 @@ class ContextPacketBuilder:
         packet_id: str,
         packet_type: PacketType = PacketType.RETRANSLATE,
         created_at: datetime | None = None,
+        packet_ordinal: int | None = None,
     ) -> tuple[TranslationPacket, list[PacketSentenceMap]]:
         now = _utcnow()
         return self._build_packet(
@@ -571,6 +577,7 @@ class ContextPacketBuilder:
             packet_id=packet_id,
             packet_type=packet_type,
             created_at=created_at or now,
+            packet_ordinal=packet_ordinal,
         )
 
     def _build_packet(
@@ -589,6 +596,7 @@ class ContextPacketBuilder:
         packet_id: str | None = None,
         packet_type: PacketType = PacketType.TRANSLATE,
         created_at: datetime | None = None,
+        packet_ordinal: int | None = None,
         current_sentences: list[Sentence] | None = None,
         current_block_text: str | None = None,
     ) -> tuple[TranslationPacket, list[PacketSentenceMap]]:
@@ -632,6 +640,21 @@ class ContextPacketBuilder:
             open_questions=chapter_brief.content_json.get("open_questions", []),
             budget_hint={"max_input_tokens": 6000, "max_output_tokens": 2500},
         )
+        resolved_packet_ordinal = packet_ordinal if packet_ordinal is not None else int(block.ordinal)
+        packet_json = context_packet.model_dump(mode="json")
+        packet_json["packet_ordinal"] = resolved_packet_ordinal
+        packet_json["chapter_memory_version"] = chapter_brief.version
+        packet_json["input_version_bundle"] = {
+            "packet_id": packet_id,
+            "chapter_id": chapter.id,
+            "packet_ordinal": resolved_packet_ordinal,
+        }
+        packet_json["runtime_state"] = {
+            "stage": "translate",
+            "substate": "ready",
+            "packet_ordinal": resolved_packet_ordinal,
+            "updated_at": now.isoformat(),
+        }
         packet = TranslationPacket(
             id=packet_id,
             chapter_id=chapter.id,
@@ -643,7 +666,7 @@ class ContextPacketBuilder:
             termbase_version=termbase_snapshot.version,
             entity_snapshot_version=entity_snapshot.version,
             style_snapshot_version=book_profile.version,
-            packet_json=context_packet.model_dump(mode="json"),
+            packet_json=packet_json,
             risk_score=0.1,
             status=PacketStatus.BUILT,
             created_at=created_at or now,
@@ -695,6 +718,7 @@ class ContextPacketBuilder:
         packet_id: str | None = None,
         packet_type: PacketType = PacketType.TRANSLATE,
         created_at: datetime | None = None,
+        packet_ordinal: int | None = None,
     ) -> tuple[TranslationPacket, list[PacketSentenceMap]]:
         current_packet_blocks = [
             self._to_packet_block(block, sentences_by_block.get(block.id, []))
@@ -739,6 +763,21 @@ class ContextPacketBuilder:
             open_questions=chapter_brief.content_json.get("open_questions", []),
             budget_hint={"max_input_tokens": 6000, "max_output_tokens": 2500},
         )
+        resolved_packet_ordinal = packet_ordinal if packet_ordinal is not None else int(current_blocks[0].ordinal)
+        packet_json = context_packet.model_dump(mode="json")
+        packet_json["packet_ordinal"] = resolved_packet_ordinal
+        packet_json["chapter_memory_version"] = chapter_brief.version
+        packet_json["input_version_bundle"] = {
+            "packet_id": packet_id,
+            "chapter_id": chapter.id,
+            "packet_ordinal": resolved_packet_ordinal,
+        }
+        packet_json["runtime_state"] = {
+            "stage": "translate",
+            "substate": "ready",
+            "packet_ordinal": resolved_packet_ordinal,
+            "updated_at": now.isoformat(),
+        }
         packet = TranslationPacket(
             id=packet_id,
             chapter_id=chapter.id,
@@ -750,7 +789,7 @@ class ContextPacketBuilder:
             termbase_version=termbase_snapshot.version,
             entity_snapshot_version=entity_snapshot.version,
             style_snapshot_version=book_profile.version,
-            packet_json=context_packet.model_dump(mode="json"),
+            packet_json=packet_json,
             risk_score=0.1,
             status=PacketStatus.BUILT,
             created_at=created_at or now,

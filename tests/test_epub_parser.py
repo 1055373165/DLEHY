@@ -80,6 +80,23 @@ MALFORMED_HTML = """<?xml version="1.0" encoding="UTF-8"?>
 </html>
 """
 
+MALFORMED_TABLE_HTML = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <h1 id="ch1">Chapter One</h1>
+    <table id="tbl-1">
+      <colgroup>
+        <col class="tcol1 align-left"/>
+        <col class="tcol2 align-left"/>
+      </colgroup>
+      <tr><th>Feature</th><th>Description</th></tr>
+      <tr><td>Multi-agent conversations</td><td>AutoGen allows multiple agents to converse and collaborate.</td></tr>
+    </table>
+    <p>AT&T keeps this XHTML from being XML-clean.</p>
+  </body>
+</html>
+"""
+
 STRUCTURED_ARTIFACT_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
   <body>
@@ -272,6 +289,28 @@ class EPUBParserTests(unittest.TestCase):
         self.assertEqual(chapter.blocks[1].metadata["image_alt"], "Agent loop architecture")
         self.assertEqual(chapter.blocks[2].metadata["tag"], "table")
         self.assertEqual(chapter.blocks[3].metadata["tag"], "math")
+
+    def test_parse_epub_with_malformed_table_fallback_preserves_table_structure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            epub_path = Path(tmpdir) / "sample-malformed-table.epub"
+            with zipfile.ZipFile(epub_path, "w") as archive:
+                archive.writestr("mimetype", "application/epub+zip")
+                archive.writestr("META-INF/container.xml", CONTAINER_XML)
+                archive.writestr("OEBPS/content.opf", CONTENT_OPF)
+                archive.writestr("OEBPS/nav.xhtml", NAV_XHTML)
+                archive.writestr("OEBPS/chapter1.xhtml", MALFORMED_TABLE_HTML)
+
+            parsed = EPUBParser().parse(epub_path)
+
+        chapter = parsed.chapters[0]
+        self.assertEqual([block.block_type for block in chapter.blocks], ["heading", "table", "paragraph"])
+        self.assertEqual(
+            chapter.blocks[1].text,
+            "Feature | Description\nMulti-agent conversations | AutoGen allows multiple agents to converse and collaborate.",
+        )
+        self.assertEqual(chapter.blocks[1].metadata["tag"], "table")
+        self.assertNotIn("<colgroup>", chapter.blocks[1].text)
+        self.assertNotIn("<col", chapter.blocks[1].text)
 
     def test_parse_epub_preserves_preformatted_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

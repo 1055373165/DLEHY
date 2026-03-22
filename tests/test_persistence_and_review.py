@@ -4668,6 +4668,836 @@ class PersistenceAndReviewTests(unittest.TestCase):
             list(render_blocks[0].source_metadata.get("recovery_flags") or []),
         )
 
+    def test_pdf_prose_artifact_repair_service_translates_mixed_paragraph_refresh_fragment(self) -> None:
+        class _RepairWorker:
+            def metadata(self) -> TranslationWorkerMetadata:
+                return TranslationWorkerMetadata(
+                    worker_name="repair-worker",
+                    model_name="repair-model",
+                    prompt_version="repair.v1",
+                )
+
+            def translate(self, task: TranslationTask) -> TranslationWorkerOutput:
+                merged = " ".join(block.text for block in task.context_packet.current_blocks)
+                return TranslationWorkerOutput(
+                    packet_id=task.context_packet.packet_id,
+                    target_segments=[
+                        TranslationTargetSegment(
+                            temp_id="repair-temp-1",
+                            text_zh=f"ZH::{merged}",
+                            segment_type="sentence",
+                            source_sentence_ids=[sentence.id for sentence in task.current_sentences],
+                            confidence=0.9,
+                        )
+                    ],
+                    alignment_suggestions=[],
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="29292929-2929-4292-8292-292929292929",
+            source_type=SourceType.PDF_SCAN,
+            file_fingerprint="fingerprint-mixed-paragraph-refresh",
+            source_path="/tmp/mixed-paragraph-refresh.pdf",
+            title="Tool Use",
+            status=DocumentStatus.EXPORTED,
+            metadata_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        chapter = Chapter(
+            id="2a2a2a2a-2a2a-42a2-82a2-2a2a2a2a2a2a",
+            document_id=document.id,
+            ordinal=5,
+            title_src="Chapter 5: Tool Use",
+            title_tgt=None,
+            anchor_start=None,
+            anchor_end=None,
+            status=ChapterStatus.EXPORTED,
+            summary_version=1,
+            risk_level=None,
+            metadata_json={"source_page_start": 83, "source_page_end": 83},
+            created_at=now,
+            updated_at=now,
+        )
+        block = Block(
+            id="2b2b2b2b-2b2b-42b2-82b2-2b2b2b2b2b2b",
+            chapter_id=chapter.id,
+            ordinal=1,
+            block_type=BlockType.CODE,
+            source_text='"""Runs all agent queries concurrently."""\ntasks = [',
+            normalized_text="",
+            source_anchor="pdf://page/83#b1",
+            source_span_json={
+                "source_page_start": 83,
+                "source_page_end": 83,
+                "pdf_block_role": "code_like",
+                "recovery_flags": ["mixed_code_prose_split", "leading_code_prefix"],
+                "refresh_split_render_fragments": [
+                    {
+                        "split_kind": "trailing_prose_suffix",
+                        "block_type": BlockType.PARAGRAPH.value,
+                        "source_anchor": "pdf://page/83#b1-trailing-prose",
+                        "source_text": (
+                            'run_agent_with_tool("What is the capital of France?"),\n'
+                            "run_agent_with_tool(\"What's the weather like in London?\"),\n"
+                            'run_agent_with_tool("Tell me something about dogs.")\n'
+                            "]\n"
+                            "await asyncio.gather(*tasks)\n"
+                            "asyncio.run(main())\n"
+                            "The code sets up a tool-calling agent using the LangChain library."
+                        ),
+                        "source_metadata": {
+                            "pdf_block_role": "body",
+                            "pdf_mixed_code_prose_split": "trailing_prose_suffix",
+                        },
+                    }
+                ],
+            },
+            parse_confidence=0.88,
+            protected_policy=ProtectedPolicy.PROTECT,
+            status=ArtifactStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        protected_sentence = Sentence(
+            id="2c2c2c2c-2c2c-42c2-82c2-2c2c2c2c2c2c",
+            block_id=block.id,
+            chapter_id=chapter.id,
+            document_id=document.id,
+            ordinal_in_block=1,
+            source_text=(block.source_text or ""),
+            normalized_text=(block.source_text or "").replace("\n", " "),
+            source_lang="en",
+            translatable=False,
+            nontranslatable_reason="code_protected",
+            source_anchor="pdf://page/83#s1",
+            source_span_json={},
+            upstream_confidence=0.88,
+            sentence_status=SentenceStatus.PROTECTED,
+            active_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        book_profile = BookProfile(
+            id="21212121-2121-4212-8212-212121212121",
+            document_id=document.id,
+            version=1,
+            book_type=BookType.TECH,
+            style_policy_json={"translation_material": "technical_book"},
+            quote_policy_json={},
+            special_content_policy_json={},
+            created_by="test",
+            created_at=now,
+        )
+        chapter_brief = MemorySnapshot(
+            id="22222222-2222-4222-8222-222222222222",
+            document_id=document.id,
+            scope_type=MemoryScopeType.CHAPTER,
+            scope_id=chapter.id,
+            snapshot_type=SnapshotType.CHAPTER_BRIEF,
+            version=1,
+            content_json={"heading_path": ["Tool Use"], "summary": "Tool Use summary."},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        termbase = MemorySnapshot(
+            id="23232323-2323-4232-8232-232323232323",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.TERMBASE,
+            version=1,
+            content_json={"terms": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        entity_registry = MemorySnapshot(
+            id="24242424-2424-4242-8242-242424242424",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.ENTITY_REGISTRY,
+            version=1,
+            content_json={"entities": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+
+        with self.session_factory() as session:
+            session.add(document)
+            session.flush()
+            session.add(chapter)
+            session.flush()
+            session.add(block)
+            session.flush()
+            session.add(protected_sentence)
+            session.add_all([book_profile, chapter_brief, termbase, entity_registry])
+            session.commit()
+
+            service = PdfProseArtifactRepairService(session, worker=_RepairWorker())
+            result = service.repair_mixed_code_prose_fragments(document.id)
+            self.assertEqual(result.fragment_count, 1)
+            self.assertEqual(result.repaired_fragment_count, 1)
+
+            bundle = BootstrapRepository(session).load_document_bundle(document.id).chapters[0]
+            render_blocks = ExportService(ExportRepository(session))._render_blocks_for_chapter(
+                ChapterExportBundle(
+                    chapter=bundle.chapter,
+                    document=document,
+                    book_profile=book_profile,
+                    blocks=bundle.blocks,
+                    document_images=[],
+                    sentences=bundle.sentences,
+                    packets=bundle.translation_packets,
+                    translation_runs=[],
+                    target_segments=[],
+                    alignment_edges=[],
+                    review_issues=[],
+                    quality_summary=None,
+                    active_snapshots=[chapter_brief, termbase, entity_registry],
+                    audit_events=[],
+                )
+            )
+
+        self.assertEqual(len(render_blocks), 2)
+        self.assertEqual(render_blocks[0].block_type, BlockType.CODE.value)
+        self.assertIn('run_agent_with_tool("What is the capital of France?"),', render_blocks[0].source_text)
+        self.assertIn("asyncio.run(main())", render_blocks[0].source_text)
+        self.assertNotIn("The code sets up a tool-calling agent", render_blocks[0].source_text)
+        self.assertEqual(render_blocks[1].block_type, BlockType.PARAGRAPH.value)
+        self.assertEqual(
+            render_blocks[1].source_text,
+            "The code sets up a tool-calling agent using the LangChain library.",
+        )
+        self.assertIn("ZH::The code sets up a tool-calling agent", render_blocks[1].target_text or "")
+        self.assertIn(
+            "persisted_mixed_code_prose_fragment_repaired",
+            list(render_blocks[0].source_metadata.get("recovery_flags") or []),
+        )
+
+    def test_pdf_prose_artifact_repair_service_rerepairs_stale_mixed_paragraph_refresh_fragment(self) -> None:
+        class _RepairWorker:
+            def metadata(self) -> TranslationWorkerMetadata:
+                return TranslationWorkerMetadata(
+                    worker_name="repair-worker",
+                    model_name="repair-model",
+                    prompt_version="repair.v1",
+                )
+
+            def translate(self, task: TranslationTask) -> TranslationWorkerOutput:
+                merged = " ".join(block.text for block in task.context_packet.current_blocks)
+                return TranslationWorkerOutput(
+                    packet_id=task.context_packet.packet_id,
+                    target_segments=[
+                        TranslationTargetSegment(
+                            temp_id="repair-temp-1",
+                            text_zh=f"ZH::{merged}",
+                            segment_type="sentence",
+                            source_sentence_ids=[sentence.id for sentence in task.current_sentences],
+                            confidence=0.9,
+                        )
+                    ],
+                    alignment_suggestions=[],
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="31313131-3131-4313-8313-313131313131",
+            source_type=SourceType.PDF_SCAN,
+            file_fingerprint="fingerprint-stale-mixed-paragraph-refresh",
+            source_path="/tmp/stale-mixed-paragraph-refresh.pdf",
+            title="Tool Use",
+            status=DocumentStatus.EXPORTED,
+            metadata_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        chapter = Chapter(
+            id="32323232-3232-4323-8323-323232323232",
+            document_id=document.id,
+            ordinal=5,
+            title_src="Chapter 5: Tool Use",
+            title_tgt=None,
+            anchor_start=None,
+            anchor_end=None,
+            status=ChapterStatus.EXPORTED,
+            summary_version=1,
+            risk_level=None,
+            metadata_json={"source_page_start": 83, "source_page_end": 83},
+            created_at=now,
+            updated_at=now,
+        )
+        prose_tail = (
+            "The code sets up a tool-calling agent using the LangChain library and the Google\n"
+            "Gemini model. It defines a search_information tool that simulates providing factual\n"
+            'answers to specific queries. The tool has predefined responses for "weather in\n'
+            'london," "capital of france," and "population of earth," and a default response for\n'
+            "other queries. A ChatGoogleGenerativeAI model is initialized, ensuring it has\n"
+            "tool-calling capabilities. A ChatPromptTemplate is created to guide the agent's\n"
+            "interaction. The create_tool_calling_agent function is used to combine the language\n"
+            "model, tools, and prompt into an agent. An AgentExecutor is then set up to manage\n"
+            "the agent's execution and tool invocation. The run_agent_with_tool asynchronous\n"
+            "function is defined to invoke the agent with a given query and print the result. The\n"
+            "main asynchronous function prepares multiple queries to be run concurrently. These\n"
+            "queries are designed to test both the specific and default responses of the\n"
+            "search_information tool. Finally, the asyncio.run(main()) call executes all the agent\n"
+            "tasks. The code includes checks for successful LLM initialization before proceeding\n"
+            "with agent setup and execution."
+        )
+        stale_tail = (
+            "tasks. The code includes checks for successful LLM initialization before proceeding\n"
+            "with agent setup and execution."
+        )
+        block = Block(
+            id="33333333-3333-4333-8333-333333333333",
+            chapter_id=chapter.id,
+            ordinal=1,
+            block_type=BlockType.CODE,
+            source_text='"""Runs all agent queries concurrently."""\ntasks = [',
+            normalized_text="",
+            source_anchor="pdf://page/83#b1",
+            source_span_json={
+                "source_page_start": 83,
+                "source_page_end": 83,
+                "pdf_block_role": "code_like",
+                "recovery_flags": ["mixed_code_prose_split", "leading_code_prefix"],
+                "refresh_split_render_fragments": [
+                    {
+                        "split_kind": "trailing_prose_suffix",
+                        "block_type": BlockType.PARAGRAPH.value,
+                        "source_anchor": "pdf://page/83#b1-trailing-prose",
+                        "source_text": (
+                            'run_agent_with_tool("What is the capital of France?"),\n'
+                            "run_agent_with_tool(\"What's the weather like in London?\"),\n"
+                            'run_agent_with_tool("Tell me something about dogs.") # Should\n'
+                            "trigger the default tool response\n"
+                            "]\n"
+                            "await asyncio.gather(*tasks)\n"
+                            "nest_asyncio.apply()\n"
+                            "asyncio.run(main())\n"
+                            f"{prose_tail}"
+                        ),
+                        "target_text": "ZH::" + stale_tail,
+                        "repair_target_text": "ZH::" + stale_tail,
+                        "repair_source_signature": stale_tail,
+                        "source_metadata": {
+                            "pdf_block_role": "body",
+                            "pdf_mixed_code_prose_split": "trailing_prose_suffix",
+                        },
+                    }
+                ],
+            },
+            parse_confidence=0.88,
+            protected_policy=ProtectedPolicy.PROTECT,
+            status=ArtifactStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        protected_sentence = Sentence(
+            id="34343434-3434-4343-8343-343434343434",
+            block_id=block.id,
+            chapter_id=chapter.id,
+            document_id=document.id,
+            ordinal_in_block=1,
+            source_text=(block.source_text or ""),
+            normalized_text=(block.source_text or "").replace("\n", " "),
+            source_lang="en",
+            translatable=False,
+            nontranslatable_reason="code_protected",
+            source_anchor="pdf://page/83#s1",
+            source_span_json={},
+            upstream_confidence=0.88,
+            sentence_status=SentenceStatus.PROTECTED,
+            active_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        book_profile = BookProfile(
+            id="35353535-3535-4353-8353-353535353535",
+            document_id=document.id,
+            version=1,
+            book_type=BookType.TECH,
+            style_policy_json={"translation_material": "technical_book"},
+            quote_policy_json={},
+            special_content_policy_json={},
+            created_by="test",
+            created_at=now,
+        )
+        chapter_brief = MemorySnapshot(
+            id="36363636-3636-4363-8363-363636363636",
+            document_id=document.id,
+            scope_type=MemoryScopeType.CHAPTER,
+            scope_id=chapter.id,
+            snapshot_type=SnapshotType.CHAPTER_BRIEF,
+            version=1,
+            content_json={"heading_path": ["Tool Use"], "summary": "Tool Use summary."},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        termbase = MemorySnapshot(
+            id="37373737-3737-4373-8373-373737373737",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.TERMBASE,
+            version=1,
+            content_json={"terms": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        entity_registry = MemorySnapshot(
+            id="38383838-3838-4383-8383-383838383838",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.ENTITY_REGISTRY,
+            version=1,
+            content_json={"entities": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+
+        with self.session_factory() as session:
+            session.add(document)
+            session.flush()
+            session.add(chapter)
+            session.flush()
+            session.add(block)
+            session.flush()
+            session.add(protected_sentence)
+            session.add_all([book_profile, chapter_brief, termbase, entity_registry])
+            session.commit()
+
+            service = PdfProseArtifactRepairService(session, worker=_RepairWorker())
+            result = service.repair_mixed_code_prose_fragments(document.id)
+            self.assertEqual(result.fragment_count, 1)
+            self.assertEqual(result.repaired_fragment_count, 1)
+
+            bundle = BootstrapRepository(session).load_document_bundle(document.id).chapters[0]
+            render_blocks = ExportService(ExportRepository(session))._render_blocks_for_chapter(
+                ChapterExportBundle(
+                    chapter=bundle.chapter,
+                    document=document,
+                    book_profile=book_profile,
+                    blocks=bundle.blocks,
+                    document_images=[],
+                    sentences=bundle.sentences,
+                    packets=bundle.translation_packets,
+                    translation_runs=[],
+                    target_segments=[],
+                    alignment_edges=[],
+                    review_issues=[],
+                    quality_summary=None,
+                    active_snapshots=[chapter_brief, termbase, entity_registry],
+                    audit_events=[],
+                )
+            )
+
+        self.assertEqual(len(render_blocks), 2)
+        self.assertEqual(render_blocks[0].block_type, BlockType.CODE.value)
+        self.assertIn("nest_asyncio.apply()", render_blocks[0].source_text)
+        self.assertIn("asyncio.run(main())", render_blocks[0].source_text)
+        self.assertNotIn("The code sets up a tool-calling agent", render_blocks[0].source_text)
+        self.assertEqual(render_blocks[1].block_type, BlockType.PARAGRAPH.value)
+        self.assertTrue((render_blocks[1].source_text or "").startswith("The code sets up a tool-calling agent"))
+        self.assertIn("ChatGoogleGenerativeAI model", render_blocks[1].source_text)
+        self.assertIn("ZH::The code sets up a tool-calling agent", render_blocks[1].target_text or "")
+
+    def test_pdf_prose_artifact_repair_service_persists_targets_for_direct_mixed_code_blocks(self) -> None:
+        class _RepairWorker:
+            def metadata(self) -> TranslationWorkerMetadata:
+                return TranslationWorkerMetadata(
+                    worker_name="repair-worker",
+                    model_name="repair-model",
+                    prompt_version="repair.v1",
+                )
+
+            def translate(self, task: TranslationTask) -> TranslationWorkerOutput:
+                merged = " ".join(block.text for block in task.context_packet.current_blocks)
+                return TranslationWorkerOutput(
+                    packet_id=task.context_packet.packet_id,
+                    target_segments=[
+                        TranslationTargetSegment(
+                            temp_id="repair-temp-1",
+                            text_zh=f"ZH::{merged}",
+                            segment_type="sentence",
+                            source_sentence_ids=[sentence.id for sentence in task.current_sentences],
+                            confidence=0.9,
+                        )
+                    ],
+                    alignment_suggestions=[],
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="39393939-3939-4393-8393-393939393939",
+            source_type=SourceType.PDF_SCAN,
+            file_fingerprint="fingerprint-direct-mixed-code-block",
+            source_path="/tmp/direct-mixed-code-block.pdf",
+            title="Tool Use",
+            status=DocumentStatus.EXPORTED,
+            metadata_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        chapter = Chapter(
+            id="40404040-4040-4404-8404-404040404040",
+            document_id=document.id,
+            ordinal=5,
+            title_src="Chapter 4: Reflection",
+            title_tgt=None,
+            anchor_start=None,
+            anchor_end=None,
+            status=ChapterStatus.EXPORTED,
+            summary_version=1,
+            risk_level=None,
+            metadata_json={"source_page_start": 73, "source_page_end": 73},
+            created_at=now,
+            updated_at=now,
+        )
+        prose_prefix = (
+            "2. Calculate its factorial (n!).\n"
+            "3. Include a clear docstring explaining what the function does.\n"
+            "4. Handle edge cases: The factorial of 0 is 1."
+        )
+        block = Block(
+            id="41414141-4141-4414-8414-414141414141",
+            chapter_id=chapter.id,
+            ordinal=1,
+            block_type=BlockType.CODE,
+            source_text=(
+                f"{prose_prefix}\n"
+                "\"\"\"\n"
+                "# --- The Reflection Loop ---\n"
+                "max_iterations = 3\n"
+                'current_code = ""'
+            ),
+            normalized_text="",
+            source_anchor="pdf://page/73#b1",
+            source_span_json={
+                "source_page_start": 73,
+                "source_page_end": 73,
+                "pdf_block_role": "code_like",
+            },
+            parse_confidence=0.88,
+            protected_policy=ProtectedPolicy.PROTECT,
+            status=ArtifactStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        protected_sentence = Sentence(
+            id="42424242-4242-4424-8424-424242424242",
+            block_id=block.id,
+            chapter_id=chapter.id,
+            document_id=document.id,
+            ordinal_in_block=1,
+            source_text=(block.source_text or ""),
+            normalized_text=(block.source_text or "").replace("\n", " "),
+            source_lang="en",
+            translatable=False,
+            nontranslatable_reason="code_protected",
+            source_anchor="pdf://page/73#s1",
+            source_span_json={},
+            upstream_confidence=0.88,
+            sentence_status=SentenceStatus.PROTECTED,
+            active_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        book_profile = BookProfile(
+            id="43434343-4343-4434-8434-434343434343",
+            document_id=document.id,
+            version=1,
+            book_type=BookType.TECH,
+            style_policy_json={"translation_material": "technical_book"},
+            quote_policy_json={},
+            special_content_policy_json={},
+            created_by="test",
+            created_at=now,
+        )
+        chapter_brief = MemorySnapshot(
+            id="44444444-4444-4444-8444-444444444444",
+            document_id=document.id,
+            scope_type=MemoryScopeType.CHAPTER,
+            scope_id=chapter.id,
+            snapshot_type=SnapshotType.CHAPTER_BRIEF,
+            version=1,
+            content_json={"heading_path": ["Tool Use"], "summary": "Tool Use summary."},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        termbase = MemorySnapshot(
+            id="45454545-4545-4454-8454-454545454545",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.TERMBASE,
+            version=1,
+            content_json={"terms": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        entity_registry = MemorySnapshot(
+            id="46464646-4646-4464-8464-464646464646",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.ENTITY_REGISTRY,
+            version=1,
+            content_json={"entities": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+
+        with self.session_factory() as session:
+            session.add(document)
+            session.flush()
+            session.add(chapter)
+            session.flush()
+            session.add(block)
+            session.flush()
+            session.add(protected_sentence)
+            session.add_all([book_profile, chapter_brief, termbase, entity_registry])
+            session.commit()
+
+            service = PdfProseArtifactRepairService(session, worker=_RepairWorker())
+            result = service.repair_mixed_code_prose_blocks(document.id)
+            self.assertEqual(result.block_count, 1)
+            self.assertEqual(result.repaired_block_count, 1)
+
+            bundle = BootstrapRepository(session).load_document_bundle(document.id).chapters[0]
+            render_blocks = ExportService(ExportRepository(session))._render_blocks_for_chapter(
+                ChapterExportBundle(
+                    chapter=bundle.chapter,
+                    document=document,
+                    book_profile=book_profile,
+                    blocks=bundle.blocks,
+                    document_images=[],
+                    sentences=bundle.sentences,
+                    packets=bundle.translation_packets,
+                    translation_runs=[],
+                    target_segments=[],
+                    alignment_edges=[],
+                    review_issues=[],
+                    quality_summary=None,
+                    active_snapshots=[chapter_brief, termbase, entity_registry],
+                    audit_events=[],
+                )
+            )
+
+        self.assertEqual(len(render_blocks), 2)
+        self.assertEqual(render_blocks[0].block_type, BlockType.PARAGRAPH.value)
+        self.assertIn(
+            "persisted_mixed_code_prose_block_repaired",
+            list(render_blocks[1].source_metadata.get("recovery_flags") or []),
+        )
+        self.assertEqual(render_blocks[0].source_text, prose_prefix)
+        self.assertIn("ZH::2. Calculate its factorial", render_blocks[0].target_text or "")
+        self.assertEqual(render_blocks[1].block_type, BlockType.CODE.value)
+        self.assertIn("# --- The Reflection Loop ---", render_blocks[1].source_text)
+        self.assertNotIn("2. Calculate its factorial", render_blocks[1].source_text)
+
+    def test_pdf_prose_artifact_repair_service_translates_trailing_prose_inside_code_fragment(self) -> None:
+        class _RepairWorker:
+            def metadata(self) -> TranslationWorkerMetadata:
+                return TranslationWorkerMetadata(
+                    worker_name="repair-worker",
+                    model_name="repair-model",
+                    prompt_version="repair.v1",
+                )
+
+            def translate(self, task: TranslationTask) -> TranslationWorkerOutput:
+                merged = " ".join(block.text for block in task.context_packet.current_blocks)
+                return TranslationWorkerOutput(
+                    packet_id=task.context_packet.packet_id,
+                    target_segments=[
+                        TranslationTargetSegment(
+                            temp_id="repair-temp-1",
+                            text_zh=f"ZH::{merged}",
+                            segment_type="sentence",
+                            source_sentence_ids=[sentence.id for sentence in task.current_sentences],
+                            confidence=0.9,
+                        )
+                    ],
+                    alignment_suggestions=[],
+                )
+
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="2d2d2d2d-2d2d-42d2-82d2-2d2d2d2d2d2d",
+            source_type=SourceType.PDF_SCAN,
+            file_fingerprint="fingerprint-mixed-code-fragment",
+            source_path="/tmp/mixed-code-fragment.pdf",
+            title="Multi-Agent Collaboration",
+            status=DocumentStatus.EXPORTED,
+            metadata_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        chapter = Chapter(
+            id="2e2e2e2e-2e2e-42e2-82e2-2e2e2e2e2e2e",
+            document_id=document.id,
+            ordinal=7,
+            title_src="Chapter 7: Multi-Agent Collaboration",
+            title_tgt=None,
+            anchor_start=None,
+            anchor_end=None,
+            status=ChapterStatus.EXPORTED,
+            summary_version=1,
+            risk_level=None,
+            metadata_json={"source_page_start": 118, "source_page_end": 119},
+            created_at=now,
+            updated_at=now,
+        )
+        block = Block(
+            id="2f2f2f2f-2f2f-42f2-82f2-2f2f2f2f2f2f",
+            chapter_id=chapter.id,
+            ordinal=1,
+            block_type=BlockType.CODE,
+            source_text='if __name__ == "__main__":',
+            normalized_text="",
+            source_anchor="pdf://page/118#b1",
+            source_span_json={
+                "source_page_start": 118,
+                "source_page_end": 119,
+                "pdf_block_role": "code_like",
+                "recovery_flags": ["cross_page_repaired", "mixed_code_prose_split", "leading_code_prefix"],
+                "refresh_split_render_fragments": [
+                    {
+                        "split_kind": "trailing_prose_suffix",
+                        "block_type": BlockType.CODE.value,
+                        "source_anchor": "pdf://page/118#b1-trailing-prose",
+                        "source_text": (
+                            "main()\n"
+                            'print("done")\n'
+                            "We will now delve into further examples within the Google ADK framework."
+                        ),
+                        "source_metadata": {
+                            "pdf_block_role": "code_like",
+                            "pdf_mixed_code_prose_split": "trailing_prose_suffix",
+                        },
+                    }
+                ],
+            },
+            parse_confidence=0.88,
+            protected_policy=ProtectedPolicy.PROTECT,
+            status=ArtifactStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        protected_sentence = Sentence(
+            id="30303030-3030-4303-8303-303030303030",
+            block_id=block.id,
+            chapter_id=chapter.id,
+            document_id=document.id,
+            ordinal_in_block=1,
+            source_text=(block.source_text or ""),
+            normalized_text=(block.source_text or "").replace("\n", " "),
+            source_lang="en",
+            translatable=False,
+            nontranslatable_reason="code_protected",
+            source_anchor="pdf://page/118#s1",
+            source_span_json={},
+            upstream_confidence=0.88,
+            sentence_status=SentenceStatus.PROTECTED,
+            active_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        book_profile = BookProfile(
+            id="25252525-2525-4252-8252-252525252525",
+            document_id=document.id,
+            version=1,
+            book_type=BookType.TECH,
+            style_policy_json={"translation_material": "technical_book"},
+            quote_policy_json={},
+            special_content_policy_json={},
+            created_by="test",
+            created_at=now,
+        )
+        chapter_brief = MemorySnapshot(
+            id="26262626-2626-4262-8262-262626262626",
+            document_id=document.id,
+            scope_type=MemoryScopeType.CHAPTER,
+            scope_id=chapter.id,
+            snapshot_type=SnapshotType.CHAPTER_BRIEF,
+            version=1,
+            content_json={"heading_path": ["Multi-Agent Collaboration"], "summary": "Multi-agent summary."},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        termbase = MemorySnapshot(
+            id="27272727-2727-4272-8272-272727272727",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.TERMBASE,
+            version=1,
+            content_json={"terms": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+        entity_registry = MemorySnapshot(
+            id="28282828-2828-4282-8282-282828282828",
+            document_id=document.id,
+            scope_type=MemoryScopeType.GLOBAL,
+            scope_id=None,
+            snapshot_type=SnapshotType.ENTITY_REGISTRY,
+            version=1,
+            content_json={"entities": []},
+            status=MemoryStatus.ACTIVE,
+            created_at=now,
+        )
+
+        with self.session_factory() as session:
+            session.add(document)
+            session.flush()
+            session.add(chapter)
+            session.flush()
+            session.add(block)
+            session.flush()
+            session.add(protected_sentence)
+            session.add_all([book_profile, chapter_brief, termbase, entity_registry])
+            session.commit()
+
+            service = PdfProseArtifactRepairService(session, worker=_RepairWorker())
+            result = service.repair_mixed_code_prose_fragments(document.id)
+            self.assertEqual(result.fragment_count, 1)
+            self.assertEqual(result.repaired_fragment_count, 1)
+
+            bundle = BootstrapRepository(session).load_document_bundle(document.id).chapters[0]
+            render_blocks = ExportService(ExportRepository(session))._render_blocks_for_chapter(
+                ChapterExportBundle(
+                    chapter=bundle.chapter,
+                    document=document,
+                    book_profile=book_profile,
+                    blocks=bundle.blocks,
+                    document_images=[],
+                    sentences=bundle.sentences,
+                    packets=bundle.translation_packets,
+                    translation_runs=[],
+                    target_segments=[],
+                    alignment_edges=[],
+                    review_issues=[],
+                    quality_summary=None,
+                    active_snapshots=[chapter_brief, termbase, entity_registry],
+                    audit_events=[],
+                )
+            )
+
+        self.assertEqual(len(render_blocks), 2)
+        self.assertEqual(render_blocks[0].block_type, BlockType.CODE.value)
+        self.assertIn("main()", render_blocks[0].source_text)
+        self.assertIn('print("done")', render_blocks[0].source_text)
+        self.assertNotIn("We will now delve into further examples", render_blocks[0].source_text)
+        self.assertEqual(render_blocks[1].block_type, BlockType.PARAGRAPH.value)
+        self.assertEqual(
+            render_blocks[1].source_text,
+            "We will now delve into further examples within the Google ADK framework.",
+        )
+        self.assertIn("ZH::We will now delve into further examples", render_blocks[1].target_text or "")
+
     def test_pdf_prose_artifact_repair_service_translates_reference_family_prose_artifact_blocks(self) -> None:
         class _RepairWorker:
             def metadata(self) -> TranslationWorkerMetadata:
@@ -5488,6 +6318,114 @@ class PersistenceAndReviewTests(unittest.TestCase):
         sentence = "For example, the output from the trend identification step could be formatted as a JSON object:"
 
         self.assertFalse(service._looks_like_single_line_codeish_text(sentence))
+
+    def test_render_blocks_keep_glossary_definition_paragraph_out_of_code_artifact(self) -> None:
+        now = datetime.now(timezone.utc)
+        document = Document(
+            id="glossary-definition-doc",
+            source_type=SourceType.PDF_SCAN,
+            file_fingerprint="fingerprint-glossary-definition",
+            source_path="/tmp/glossary-definition.pdf",
+            title="Glossary",
+            status=DocumentStatus.EXPORTED,
+            metadata_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        chapter = Chapter(
+            id="glossary-definition-chapter",
+            document_id=document.id,
+            ordinal=92,
+            title_src="Glossary",
+            title_tgt=None,
+            anchor_start=None,
+            anchor_end=None,
+            status=ChapterStatus.TRANSLATED,
+            summary_version=None,
+            risk_level=None,
+            metadata_json={"source_page_start": 428, "source_page_end": 428},
+            created_at=now,
+            updated_at=now,
+        )
+        blocks = [
+            Block(
+                id="glossary-definition-title",
+                chapter_id=chapter.id,
+                ordinal=1,
+                block_type=BlockType.HEADING,
+                source_text="Glossary",
+                normalized_text="",
+                source_anchor="pdf://page/428#b1",
+                source_span_json={
+                    "source_page_start": 428,
+                    "source_page_end": 428,
+                    "source_bbox_json": {"regions": [{"page_number": 428, "bbox": [94.0, 108.0, 704.0, 142.0]}]},
+                    "pdf_block_role": "heading",
+                    "pdf_page_family": "backmatter",
+                    "reading_order_index": 1,
+                },
+                parse_confidence=0.95,
+                protected_policy=ProtectedPolicy.TRANSLATE,
+                status=ArtifactStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+            ),
+            Block(
+                id="glossary-definition-body",
+                chapter_id=chapter.id,
+                ordinal=2,
+                block_type=BlockType.PARAGRAPH,
+                source_text=(
+                    "ReAct (Reason and Act): This pattern combines reasoning and acting so an agent can "
+                    "interleave thought with tool use.\n"
+                    "Planning: This is an agent's ability to\n"
+                    "break down a high-level goal into a\n"
+                    "sequence of smaller, coordinated steps."
+                ),
+                normalized_text="",
+                source_anchor="pdf://page/428#b2",
+                source_span_json={
+                    "source_page_start": 428,
+                    "source_page_end": 428,
+                    "source_bbox_json": {"regions": [{"page_number": 428, "bbox": [94.0, 168.0, 704.0, 250.0]}]},
+                    "pdf_block_role": "body",
+                    "pdf_page_family": "backmatter",
+                    "reading_order_index": 2,
+                },
+                parse_confidence=0.95,
+                protected_policy=ProtectedPolicy.TRANSLATE,
+                status=ArtifactStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+        bundle = ChapterExportBundle(
+            chapter=chapter,
+            document=document,
+            book_profile=None,
+            blocks=blocks,
+            document_images=[],
+            sentences=[],
+            packets=[],
+            translation_runs=[],
+            target_segments=[],
+            alignment_edges=[],
+            review_issues=[],
+            quality_summary=None,
+            active_snapshots=[],
+            audit_events=[],
+        )
+
+        with self.session_factory() as session:
+            service = ExportService(ExportRepository(session))
+            render_blocks = service._render_blocks_for_chapter(bundle)
+
+        self.assertEqual(len(render_blocks), 2)
+        self.assertEqual(render_blocks[1].block_type, BlockType.PARAGRAPH.value)
+        self.assertEqual(render_blocks[1].artifact_kind, None)
+        self.assertEqual(render_blocks[1].render_mode, "zh_primary_with_optional_source")
+        self.assertIn("Planning: This is an agent's ability to", render_blocks[1].source_text)
+        self.assertNotIn("pdf_mixed_code_prose_split", render_blocks[1].source_metadata)
 
     def test_join_block_target_text_preserves_bullet_segment_breaks(self) -> None:
         source_text = (
@@ -7591,6 +8529,114 @@ class PersistenceAndReviewTests(unittest.TestCase):
         assert bbox is not None
         self.assertGreaterEqual(bbox[1], 250.0)
         self.assertLess(bbox[3], 482.0)
+
+    def test_export_epub_archive_assets_recovers_legacy_figure_image_path_from_caption(self) -> None:
+        chapter_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <div class="Para">Intro text.
+      <figure class="Figure" id="Fig1">
+        <div class="MediaObject" id="MO1">
+          <img alt="" src="../images/ch1/fig1.png" />
+        </div>
+        <figcaption class="Caption" lang="en">
+          <div class="CaptionContent">
+            <span class="CaptionNumber">Fig. 1.1</span>
+            <p class="SimplePara">The historical trajectory of AI Agents</p>
+          </div>
+        </figcaption>
+      </figure>
+    </div>
+  </body>
+</html>
+"""
+
+        block = MergedRenderBlock(
+            block_id="legacy-epub-figure-caption",
+            chapter_id="chapter-1",
+            block_type=BlockType.CAPTION.value,
+            render_mode="image_anchor_with_translated_caption",
+            artifact_kind="figure",
+            title=None,
+            source_text="Fig. 1.1The historical trajectory of AI Agents",
+            target_text="图 1.1 AI 智能体的历史发展轨迹",
+            source_metadata={"source_path": "OEBPS/html/chapter1.xhtml", "tag": "figcaption"},
+            source_sentence_ids=[],
+            target_segment_ids=[],
+            is_expected_source_only=True,
+            notice="图片锚点保留",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            epub_path = Path(tmpdir) / "legacy-figure.epub"
+            output_dir = Path(tmpdir) / "export"
+            with zipfile.ZipFile(epub_path, "w") as archive:
+                archive.writestr("OEBPS/html/chapter1.xhtml", chapter_xhtml)
+                archive.writestr("OEBPS/images/ch1/fig1.png", b"fake-png-bytes")
+
+            with self.session_factory() as session:
+                service = ExportService(ExportRepository(session))
+                asset_map = service._export_epub_archive_assets(str(epub_path), [block], output_dir)
+
+            self.assertEqual(
+                asset_map,
+                {"legacy-epub-figure-caption": "assets/OEBPS/images/ch1/fig1.png"},
+            )
+            self.assertTrue((output_dir / "assets/OEBPS/images/ch1/fig1.png").is_file())
+
+    def test_export_epub_archive_assets_recovers_legacy_figure_image_path_from_malformed_xhtml(self) -> None:
+        chapter_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <div class="Para">AT&T legacy prose before the figure.
+      <figure class="Figure" id="Fig1">
+        <div class="MediaObject" id="MO1">
+          <img alt="" src="../images/ch1/fig1.png" />
+        </div>
+        <figcaption class="Caption" lang="en">
+          <div class="CaptionContent">
+            <span class="CaptionNumber">Fig. 1.1</span>
+            <p class="SimplePara">The historical trajectory of AI Agents</p>
+          </div>
+        </figcaption>
+      </figure>
+    </div>
+  </body>
+</html>
+"""
+
+        block = MergedRenderBlock(
+            block_id="legacy-epub-figure-caption-malformed",
+            chapter_id="chapter-1",
+            block_type=BlockType.CAPTION.value,
+            render_mode="image_anchor_with_translated_caption",
+            artifact_kind="image",
+            title=None,
+            source_text="Fig. 1.1The historical trajectory of AI Agents",
+            target_text="图 1.1 AI 智能体的历史发展轨迹",
+            source_metadata={"source_path": "OEBPS/html/chapter1.xhtml", "tag": "figcaption"},
+            source_sentence_ids=[],
+            target_segment_ids=[],
+            is_expected_source_only=True,
+            notice="图片锚点保留",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            epub_path = Path(tmpdir) / "legacy-figure-malformed.epub"
+            output_dir = Path(tmpdir) / "export"
+            with zipfile.ZipFile(epub_path, "w") as archive:
+                archive.writestr("OEBPS/html/chapter1.xhtml", chapter_xhtml)
+                archive.writestr("OEBPS/images/ch1/fig1.png", b"fake-png-bytes")
+
+            with self.session_factory() as session:
+                service = ExportService(ExportRepository(session))
+                asset_map = service._export_epub_archive_assets(str(epub_path), [block], output_dir)
+
+            self.assertEqual(
+                asset_map,
+                {"legacy-epub-figure-caption-malformed": "assets/OEBPS/images/ch1/fig1.png"},
+            )
+            self.assertTrue((output_dir / "assets/OEBPS/images/ch1/fig1.png").is_file())
 
     def test_extract_main_chapter_number_rejects_lowercase_fragment_after_number(self) -> None:
         with self.session_factory() as session:
@@ -9917,7 +10963,7 @@ class PersistenceAndReviewTests(unittest.TestCase):
             self.assertEqual(alignment_action.scope_type, JobScopeType.PACKET)
             self.assertEqual(alignment_action.scope_id, packet_id)
 
-    def test_review_handles_orphan_target_without_sentence_mapping(self) -> None:
+    def test_review_routes_orphan_target_without_sentence_mapping_to_packet_rerun(self) -> None:
         document_id, _ = self._bootstrap_to_db()
 
         with self.session_factory() as session:
@@ -9950,7 +10996,8 @@ class PersistenceAndReviewTests(unittest.TestCase):
             alignment_action = next(action for action in review_artifacts.actions if action.issue_id == alignment_issue.id)
 
             self.assertIn(orphan_target_id, alignment_issue.evidence_json["orphan_target_segment_ids"])
-            self.assertEqual(alignment_action.action_type, ActionType.REALIGN_ONLY)
+            self.assertTrue(bool(alignment_issue.evidence_json.get("requires_packet_rerun")))
+            self.assertEqual(alignment_action.action_type, ActionType.RERUN_PACKET)
             self.assertEqual(alignment_action.scope_type, JobScopeType.PACKET)
             self.assertEqual(alignment_action.scope_id, packet_id)
 

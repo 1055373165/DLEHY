@@ -63,6 +63,8 @@ class ContextPacket(BaseSchema):
     packet_type: Literal["translate", "retranslate", "review"]
     book_profile_version: int
     chapter_brief_version: int | None = None
+    packet_ordinal: int | None = None
+    chapter_memory_version: int | None = None
     heading_path: list[str] = Field(default_factory=list)
     current_blocks: list[PacketBlock]
     prev_blocks: list[PacketBlock] = Field(default_factory=list)
@@ -77,6 +79,8 @@ class ContextPacket(BaseSchema):
     discourse_bridge: DiscourseBridge | None = None
     style_constraints: dict[str, str | bool | int | float] = Field(default_factory=dict)
     open_questions: list[str] = Field(default_factory=list)
+    input_version_bundle: dict[str, Any] = Field(default_factory=dict)
+    runtime_state: dict[str, Any] = Field(default_factory=dict)
     budget_hint: dict[str, int] = Field(default_factory=dict)
 
 

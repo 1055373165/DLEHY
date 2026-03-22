@@ -7,8 +7,21 @@ from book_agent.app.runtime.document_run_executor import (
     _is_retryable_exception,
     _pause_reason_for_exception,
 )
-from book_agent.domain.enums import DocumentStatus, DocumentRunType, SourceType
-from book_agent.domain.models import Document
+from book_agent.domain.enums import (
+    ArtifactStatus,
+    BlockType,
+    ChapterStatus,
+    DocumentStatus,
+    DocumentRunType,
+    PacketStatus,
+    PacketType,
+    ProtectedPolicy,
+    SourceType,
+    WorkItemStage,
+    WorkItemStatus,
+)
+from book_agent.domain.models import Block, Chapter, Document
+from book_agent.domain.models.translation import TranslationPacket
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.infra.repositories.run_control import RunControlRepository
@@ -42,6 +55,14 @@ class RunExecutionServiceTests(unittest.TestCase):
 
     def _create_running_run(self, *, budget: RunBudgetSummary | None = None) -> str:
         document_id = self._create_document()
+        return self._create_running_run_for_document(document_id, budget=budget)
+
+    def _create_running_run_for_document(
+        self,
+        document_id: str,
+        *,
+        budget: RunBudgetSummary | None = None,
+    ) -> str:
         with self.session_factory() as session:
             repository = RunControlRepository(session)
             control = RunControlService(repository)
@@ -54,6 +75,76 @@ class RunExecutionServiceTests(unittest.TestCase):
             resumed = control.resume_run(run.run_id, actor_id="test-runner", note="start")
             session.commit()
             return resumed.run_id
+
+    def _create_document_with_chapter_packets(
+        self,
+        chapter_packet_ordinals: list[list[int]],
+    ) -> tuple[str, list[list[str]]]:
+        document_id = self._create_document()
+        with self.session_factory() as session:
+            packet_ids_by_chapter: list[list[str]] = []
+            for chapter_index, packet_ordinals in enumerate(chapter_packet_ordinals, start=1):
+                chapter = Chapter(
+                    document_id=document_id,
+                    ordinal=chapter_index,
+                    title_src=f"Chapter {chapter_index}",
+                    status=ChapterStatus.PACKET_BUILT,
+                    metadata_json={},
+                )
+                session.add(chapter)
+                session.flush()
+
+                chapter_packet_ids: list[str] = []
+                for packet_ordinal in packet_ordinals:
+                    block = Block(
+                        chapter_id=chapter.id,
+                        ordinal=packet_ordinal,
+                        block_type=BlockType.PARAGRAPH,
+                        source_text=f"Chapter {chapter_index} packet {packet_ordinal}",
+                        normalized_text=f"Chapter {chapter_index} packet {packet_ordinal}",
+                        source_span_json={},
+                        protected_policy=ProtectedPolicy.TRANSLATE,
+                        status=ArtifactStatus.ACTIVE,
+                    )
+                    session.add(block)
+                    session.flush()
+
+                    packet = TranslationPacket(
+                        chapter_id=chapter.id,
+                        block_start_id=block.id,
+                        block_end_id=block.id,
+                        packet_type=PacketType.TRANSLATE,
+                        book_profile_version=1,
+                        chapter_brief_version=1,
+                        termbase_version=1,
+                        entity_snapshot_version=1,
+                        style_snapshot_version=1,
+                        packet_json={
+                            "packet_id": str(uuid4()),
+                            "chapter_id": chapter.id,
+                            "current_blocks": [{"block_id": block.id, "sentence_ids": []}],
+                            "packet_ordinal": packet_ordinal,
+                            "input_version_bundle": {
+                                "chapter_id": chapter.id,
+                                "packet_ordinal": packet_ordinal,
+                            },
+                            "runtime_state": {
+                                "stage": "translate",
+                                "substate": "ready",
+                                "packet_ordinal": packet_ordinal,
+                            },
+                        },
+                        risk_score=0.1,
+                        status=PacketStatus.BUILT,
+                    )
+                    session.add(packet)
+                    session.flush()
+                    chapter_packet_ids.append(packet.id)
+
+                packet_ids_by_chapter.append(chapter_packet_ids)
+
+            session.commit()
+        return document_id, packet_ids_by_chapter
 
     def test_run_execution_success_lifecycle_updates_usage_and_terminal_state(self) -> None:
         run_id = self._create_running_run()
@@ -200,6 +291,205 @@ class RunExecutionServiceTests(unittest.TestCase):
         self.assertIsNotNone(reclaimed_claim)
         assert reclaimed_claim is not None
         self.assertEqual(reclaimed_claim.attempt, 2)
+
+    def test_claim_translate_work_items_prefers_front_packet_even_when_work_item_order_is_reversed(self) -> None:
+        document_id, packet_ids_by_chapter = self._create_document_with_chapter_packets([[1, 2]])
+        run_id = self._create_running_run_for_document(document_id)
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root="/tmp",
+            translation_worker=None,
+        )
+
+        first_packet_id, second_packet_id = packet_ids_by_chapter[0]
+        with self.session_factory() as session:
+            execution = RunExecutionService(RunControlRepository(session))
+            versions = executor._translate_input_versions(session, [second_packet_id, first_packet_id])
+            self.assertEqual(versions[first_packet_id]["packet_ordinal"], 1)
+            self.assertEqual(versions[second_packet_id]["packet_ordinal"], 2)
+
+            execution.seed_translate_work_items(
+                run_id=run_id,
+                packet_ids=[second_packet_id, first_packet_id],
+                input_version_bundle_by_packet_id=versions,
+            )
+            items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            item_by_scope_id = {str(item.scope_id): item for item in items}
+            item_by_scope_id[second_packet_id].created_at = datetime(2026, 3, 22, 0, 0, 0, tzinfo=timezone.utc)
+            item_by_scope_id[first_packet_id].created_at = datetime(2026, 3, 22, 0, 1, 0, tzinfo=timezone.utc)
+            session.commit()
+
+            translate_items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            claimed = executor._claim_translate_work_items(
+                session=session,
+                execution=execution,
+                run_id=run_id,
+                translate_items=translate_items,
+            )
+            self.assertEqual(len(claimed), 1)
+            self.assertEqual(claimed[0].scope_id, first_packet_id)
+
+            leased_packet = session.get(TranslationPacket, first_packet_id)
+            self.assertIsNotNone(leased_packet)
+            assert leased_packet is not None
+            self.assertEqual(leased_packet.packet_json["runtime_state"]["substate"], "leased")
+            self.assertEqual(leased_packet.packet_json["runtime_state"]["packet_ordinal"], 1)
+            self.assertEqual(leased_packet.packet_json["runtime_state"]["work_item_id"], claimed[0].work_item_id)
+
+            waiting_packet = session.get(TranslationPacket, second_packet_id)
+            self.assertIsNotNone(waiting_packet)
+            assert waiting_packet is not None
+            self.assertEqual(waiting_packet.packet_json["runtime_state"]["substate"], "ready")
+
+    def test_seedable_translate_packet_ids_only_advance_frontier_for_unblocked_chapter(self) -> None:
+        document_id, packet_ids_by_chapter = self._create_document_with_chapter_packets([[1, 2], [1, 2]])
+        run_id = self._create_running_run_for_document(document_id)
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root="/tmp",
+            translation_worker=None,
+        )
+
+        chapter_one_first, chapter_one_second = packet_ids_by_chapter[0]
+        chapter_two_first, chapter_two_second = packet_ids_by_chapter[1]
+
+        with self.session_factory() as session:
+            execution = RunExecutionService(RunControlRepository(session))
+            seedable = executor._list_seedable_translate_packet_ids(
+                session=session,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=[],
+            )
+            self.assertEqual(set(seedable), {chapter_one_first, chapter_two_first})
+
+            execution.seed_translate_work_items(
+                run_id=run_id,
+                packet_ids=seedable,
+                input_version_bundle_by_packet_id=executor._translate_input_versions(session, seedable),
+            )
+            translate_items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            self.assertEqual(len(translate_items), 2)
+
+            blocked_seedable = executor._list_seedable_translate_packet_ids(
+                session=session,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=translate_items,
+            )
+            self.assertEqual(blocked_seedable, [])
+
+            completed_item = next(item for item in translate_items if str(item.scope_id) == chapter_one_first)
+            completed_item.status = WorkItemStatus.SUCCEEDED
+            completed_packet = session.get(TranslationPacket, chapter_one_first)
+            self.assertIsNotNone(completed_packet)
+            assert completed_packet is not None
+            completed_packet.status = PacketStatus.TRANSLATED
+            completed_packet.packet_json = {
+                **dict(completed_packet.packet_json or {}),
+                "runtime_state": {
+                    "stage": "translate",
+                    "substate": "translated",
+                    "packet_ordinal": 1,
+                },
+            }
+            session.merge(completed_item)
+            session.merge(completed_packet)
+            session.commit()
+
+            refreshed_items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            next_seedable = executor._list_seedable_translate_packet_ids(
+                session=session,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=refreshed_items,
+            )
+            self.assertEqual(next_seedable, [chapter_one_second])
+            self.assertNotIn(chapter_two_second, next_seedable)
+
+    def test_retryable_front_packet_blocks_same_chapter_followup_until_reclaimed_packet_is_retried(self) -> None:
+        document_id, packet_ids_by_chapter = self._create_document_with_chapter_packets([[1, 2]])
+        run_id = self._create_running_run_for_document(
+            document_id,
+            budget=RunBudgetSummary(
+                max_wall_clock_seconds=None,
+                max_total_cost_usd=None,
+                max_total_token_in=None,
+                max_total_token_out=None,
+                max_retry_count_per_work_item=2,
+                max_consecutive_failures=None,
+                max_parallel_workers=1,
+                max_parallel_requests_per_provider=1,
+                max_auto_followup_attempts=1,
+            ),
+        )
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root="/tmp",
+            translation_worker=None,
+        )
+        first_packet_id, second_packet_id = packet_ids_by_chapter[0]
+
+        with self.session_factory() as session:
+            execution = RunExecutionService(RunControlRepository(session))
+            seeded_packet_ids = executor._seed_translate_frontier_work_items(
+                session=session,
+                execution=execution,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=[],
+            )
+            self.assertEqual(seeded_packet_ids, [first_packet_id])
+
+            translate_items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            claimed = executor._claim_translate_work_items(
+                session=session,
+                execution=execution,
+                run_id=run_id,
+                translate_items=translate_items,
+            )
+            self.assertEqual(len(claimed), 1)
+            self.assertEqual(claimed[0].scope_id, first_packet_id)
+
+            execution.start_work_item(lease_token=claimed[0].lease_token, lease_seconds=30)
+            lease = RunControlRepository(session).get_active_lease_by_token(claimed[0].lease_token)
+            work_item = RunControlRepository(session).get_work_item(claimed[0].work_item_id)
+            expired_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+            lease.lease_expires_at = expired_at
+            work_item.lease_expires_at = expired_at
+            session.commit()
+
+        self.assertTrue(executor._reclaim_expired_leases(run_id))
+
+        with self.session_factory() as session:
+            execution = RunExecutionService(RunControlRepository(session))
+            refreshed_items = executor._list_stage_items(session, run_id, WorkItemStage.TRANSLATE)
+            self.assertEqual(len(refreshed_items), 1)
+            self.assertEqual(refreshed_items[0].status, WorkItemStatus.RETRYABLE_FAILED)
+            self.assertEqual(str(refreshed_items[0].scope_id), first_packet_id)
+
+            blocked_seedable = executor._list_seedable_translate_packet_ids(
+                session=session,
+                run_id=run_id,
+                document_id=document_id,
+                translate_items=refreshed_items,
+            )
+            self.assertEqual(blocked_seedable, [])
+
+            reclaimed_claim = executor._claim_translate_work_items(
+                session=session,
+                execution=execution,
+                run_id=run_id,
+                translate_items=refreshed_items,
+            )
+            self.assertEqual(len(reclaimed_claim), 1)
+            self.assertEqual(reclaimed_claim[0].scope_id, first_packet_id)
+            self.assertEqual(reclaimed_claim[0].attempt, 2)
+
+            waiting_packet = session.get(TranslationPacket, second_packet_id)
+            self.assertIsNotNone(waiting_packet)
+            assert waiting_packet is not None
+            self.assertEqual(waiting_packet.packet_json["runtime_state"]["substate"], "ready")
 
     def test_budget_guardrail_pauses_run_when_cost_limit_is_exceeded(self) -> None:
         run_id = self._create_running_run(

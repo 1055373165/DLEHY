@@ -421,3 +421,95 @@
 - 推翻条件：如果后续真实整章/整书验证表明 `v6` 在别的材料类型上出现系统性副作用，或者 prompt 成本增幅超过质量收益，再考虑材料分流或回退。
 - 影响范围：`src/book_agent/core/config.py`、`src/book_agent/workers/translator.py`、`src/book_agent/services/packet_experiment.py`、`src/book_agent/services/translation_chapter_smoke.py`、`tests/test_translation_worker_abstraction.py`。
 - 探针验证：已通过（默认配置下的真实 packet `670447b0...` 复测表明：当前运行 profile 已是 `role-style-faithful-v6`，`Agentic AI` 保持为 `智能体AI`，尾句稳定落在“长期稳定、周到地照应你”，未回退到“连贯性和关怀/贴心服务”式抽象表达）。
+
+## ADR-030：PDF mixed code/prose repair 必须对齐最终 render 路径，而不是仅依赖原始 block 文本
+- 状态：已验证（真实整书重导出完成）
+- 日期：2026-03-22
+- 背景：从第 5 章开始的真实 PDF 样本暴露出一个关键差异：不少跨页代码问题并不是在原始 block 文本里直接表现为“代码 + 正文”，而是在 export/render 阶段经过跨页恢复、refresh split 修复或 code normalization 后，才显式长出 `leading_prose_prefix / trailing_prose_suffix`。原先 `repair_mixed_code_prose_blocks(...)` 只扫描原始 code block，因此会漏掉这类“render 时才显形”的正文泄漏。
+- 候选方案：
+  - 继续只基于原始 block 文本做 mixed code/prose repair
+  - 在 repair 阶段改为直接扫描真实 `render_blocks`，以 `pdf_mixed_code_prose_split` 元数据为准回写目标译文
+- 最终决定：采用第二种。`repair_mixed_code_prose_blocks(...)` 现在直接调用 `ExportService._render_blocks_for_chapter(...)` 生成真实 render blocks，并以渲染后出现的 `leading_prose_prefix / trailing_prose_suffix` 段落作为候选，再把目标译文持久化回原始 code block 的 `mixed_code_prose_repair_targets`。这样 repair 逻辑与最终 merged html/md 的呈现路径保持一致，不再漏掉 render-time 才出现的跨页正文泄漏。
+- 代价与妥协：repair 服务现在依赖 export repository / render 逻辑，耦合度比“只看原始 block”更高；但换来的是对真实最终产物更可靠的修复覆盖率。
+- 推翻条件：如果未来 parser/refresh 层已经能在入库前稳定拆好所有 mixed code/prose，不再需要 render-time 才识别出段落泄漏，则可以把 repair 候选重新下沉回结构层。
+- 影响范围：`src/book_agent/services/pdf_prose_artifact_repair.py`、`src/book_agent/services/export.py`、`tests/test_persistence_and_review.py`、真实文档 `67283f52...` 的 merged html/md 导出。
+- 探针验证：已通过（真实文档从第 5 章到末章重跑后，Chapter 6 / 7 / 10 / 19 中代码块后的英文正文均已在最终导出物中恢复为中文；render residual 仅剩 Glossary 的 2 个非章节块，不在本轮章节范围内）。
+
+## ADR-031：Multi-Agent 升级继续采用 deterministic control plane，而不是自由协作式 swarm
+- 状态：已决定
+- 日期：2026-03-22
+- 背景：当前仓库已经具备 `bootstrap -> translate -> review -> export` 的可恢复主链路，并且 run-control、issue routing、chapter memory、packet review 都已经有明确定义。Multi-agent 升级的目标是提高结构可解释性和角色边界，而不是引入 agent 对话复杂度。
+- 候选方案：
+  - 重构成多个自由协作的 LLM agent，由对话自行协调任务
+  - 保留 deterministic control plane，把高价值角色显式化为 service boundary
+- 最终决定：采用第二种。Phase 1 的 multi-agent 升级只显式化角色和协议，不改成自由协作式 swarm。
+- 代价与妥协：短期内“agent 感”更弱，需要继续接受数据库状态和规则系统是主控制面的现实。
+- 推翻条件：如果后续某些流程被证明只有通过真正的异步多角色会话才能稳定解决，再单点引入自治 agent，而不是整体重构。
+- 影响范围：`document_run_executor.py`、`run_execution.py`、`review.py`、`translation.py`、`docs/multi-agent-final-implementation-plan.md`
+- 探针验证：不需要（这是在现有仓库能力和 Phase 1 风险边界下做出的架构风格决策）。
+
+## ADR-032：Structured state 仍是唯一真相，Markdown 只是标准工作视图和交付视图
+- 状态：已决定
+- 日期：2026-03-22
+- 背景：用户明确希望 Markdown 成为更自然的中间结果格式，但当前系统的 sentence alignment、packet provenance、issue routing、rerun 计划、bbox 证据都依赖结构化状态。
+- 候选方案：
+  - 让 Markdown 取代 JSON/DB，成为唯一中间格式
+  - 保留结构化状态为真相，同时把 Markdown 作为统一的人类可读工作视图
+- 最终决定：采用第二种。DB/JSON/ORM 状态继续做 control plane 真相；Markdown 用于翻译、阅读、导出和人工检查。
+- 代价与妥协：系统会同时维护两类视图，需要持续保证 structured state 和 Markdown render 的一致性。
+- 推翻条件：只有当后续证明 alignment、issue、bbox 等控制信息也能稳定嵌入统一文本 IR，且不损失审计能力时，才重新评估。
+- 影响范围：`services/export.py`、`services/layout_validate.py`、`domain/models/*`、`docs/multi-agent-final-implementation-plan.md`
+- 探针验证：不需要（这是数据真相层的原则性决策）。
+
+## ADR-033：Phase 1 的调度粒度固定为“章间并行、章内串行”
+- 状态：已决定
+- 日期：2026-03-22
+- 背景：用户已确认本次升级首先要解决术语一致性、chapter memory 连续性和 rerun 可控性，而不是把单书吞吐推到极致。当前 chapter memory 设计也天然要求 packet acceptance 具备顺序性。
+- 候选方案：
+  - 全书 packet 全量并行，靠后处理解决一致性
+  - 章节内也并行，但在 memory 层做复杂冲突合并
+  - 章间并行、章内串行
+- 最终决定：采用第三种。不同 chapter lane 可以并发推进，但同一章任意时刻只允许一个 active translate packet。
+- 代价与妥协：单章长章节的吞吐上限会更低，但 memory continuity、issue attribution 和 rerun reproducibility 更稳定。
+- 推翻条件：如果后续章节内串行成为明显瓶颈，且 chapter memory 冲突可以被更低成本地控制，再考虑放宽到“局部并行 + 顺序提交”。
+- 影响范围：`document_run_executor.py`、`run_execution.py`、`state_machine.py`、`tests/test_run_execution.py`、后续 `tests/test_chapter_lane_serialization.py`
+- 探针验证：不需要（这是执行顺序与一致性优先级的权衡决策）。
+
+## ADR-034：Memory 先实现为显式 service facade，worker 只读快照并提出建议
+- 状态：已验证（读侧接线完成）
+- 日期：2026-03-22
+- 背景：此前 `TranslationService` 直接拼接 chapter memory + context compile，worker 实际消费到的是“编译后的结果”，但这条路径没有独立 service 边界，也没有显式表明 memory version 是运行时契约的一部分。
+- 候选方案：
+  - 继续让 translation service 直接访问 chapter memory repository 和 compiler
+  - 先提取 `MemoryService`，负责读快照、装配 compiled context，并把版本元数据显式传入 worker
+- 最终决定：采用第二种，并在当前轮次引入 `MemoryService + CompiledTranslationContext`。worker 现在显式接收 `context_compile_version` 和 `memory_version_used`。
+- 代价与妥协：当前轮次只完成了读侧 service 化，写侧的“review approval 后再 commit chapter memory”仍待后续回合收口。
+- 推翻条件：如果后续证明 `MemoryService` 只是一层薄包装且没有降低复杂度，可将其再次折回，但前提是显式 compiled context 契约保留。
+- 影响范围：`src/book_agent/services/memory_service.py`、`src/book_agent/services/context_compile.py`、`src/book_agent/services/translation.py`、`src/book_agent/workers/contracts.py`、`tests/test_memory_service.py`
+- 探针验证：已通过（定向回归已证明 compiled context 会显式进入 worker，且 `TranslationRun.model_config_json` 会记录 `context_compile_version` 与 `memory_version_used`）。
+
+## ADR-035：Phase 1 Multi-Agent 范围锁定为 EPUB / PDF_TEXT / PDF_MIXED，交付 merged markdown 与 bilingual HTML
+- 状态：已决定
+- 日期：2026-03-22
+- 背景：在多种升级方向中，最容易拖慢进度的是同时把 scanned PDF、图内文字回写、rebuild EPUB/PDF 一起纳入首版。用户已经明确要求先确保交付节奏和方向稳定。
+- 候选方案：
+  - 首版同时支持 EPUB / text PDF / mixed PDF / scanned PDF，并直接交付 rebuilt EPUB/PDF
+  - 首版只锁 EPUB / text PDF / mixed PDF，输出 merged markdown 与 bilingual HTML，把其余能力延后
+- 最终决定：采用第二种。Phase 1 的 multi-agent 升级只承诺 `EPUB + PDF_TEXT + PDF_MIXED` 和 `MERGED_MARKDOWN + BILINGUAL_HTML`。
+- 代价与妥协：用户短期内看不到 rebuilt EPUB/PDF 和 scanned PDF 入口，但整个升级可以在更稳的范围内闭环。
+- 推翻条件：如果后续 regression corpus 证明 scanned PDF 或 rebuilt EPUB/PDF 已经有足够稳定的结构恢复和 export 路径，再单独开启 Phase 2。
+- 影响范围：`docs/multi-agent-final-implementation-plan.md`、`PROGRESS.md`、后续 Phase 1 验收口径
+- 探针验证：不需要（这是 Phase 1 范围和交付物边界的用户确认决策）。
+
+## ADR-036：EPUB 图片导出在章节 XHTML 不可 XML 解析时回退到 HTML figure 索引
+- 状态：已决定
+- 日期：2026-03-22
+- 背景：真实 EPUB 文档 `cf32d839...` 的章节 XHTML 含非 XML 友好的字符，`ElementTree` 在 `_parse_xml_document(...)` 处抛 `ParseError`，导致 `_index_epub_figure_archive_paths(...)` 返回空索引，merged HTML 虽保留图注但无法导出真实图片文件。
+- 候选方案：
+  - 要求重新 bootstrap / refresh EPUB，把图片单独入库为 `DocumentImage`
+  - 保持现有导出路径不变，并在导出时为章节 XHTML 增加容错 HTML figure 索引 fallback
+- 最终决定：采用第二种。导出层在 XML 解析失败时，回退到 `HTMLParser` 级别扫描 `<figure>/<img>/<figcaption>`，继续按图注签名恢复 EPUB 内部图片路径。
+- 代价与妥协：manifest 里的 `pdf_image_summary` 仍是基于 `DocumentImage` 的存量视角，不会因为这条导出时 fallback 自动变成“图片入库统计”；但用户可见的 merged HTML 图片恢复优先级更高。
+- 推翻条件：如果后续 EPUB refresh 链路稳定落库 `DocumentImage`，且导出能统一只依赖持久化图片记录，可再收缩这条 fallback。
+- 影响范围：`src/book_agent/services/export.py`、`tests/test_persistence_and_review.py`、真实导出目录 `artifacts/exports/cf32d839...`
+- 探针验证：已通过（新增 malformed XHTML EPUB 资产恢复回归，且真实文档重导后恢复 44 个图片文件与 44 个 `<img>` 标签）。
