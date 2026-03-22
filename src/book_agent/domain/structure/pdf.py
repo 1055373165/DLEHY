@@ -4393,6 +4393,8 @@ class PdfStructureRecoveryService:
                 return "heading"
         if _looks_like_equation(text, raw_block.line_count, raw_block.bbox, page.width):
             return "equation"
+        if _looks_like_list_item(text, raw_block.line_count):
+            return "list_item"
         if _looks_like_code(text, raw_block.line_count):
             return "code_like"
         if raw_block.font_names and _has_monospace_font(raw_block.font_names) and raw_block.line_count >= 2:
@@ -4414,6 +4416,8 @@ class PdfStructureRecoveryService:
             return BlockType.CODE
         if role == "table_like":
             return BlockType.TABLE
+        if role == "list_item":
+            return BlockType.LIST_ITEM
         if role == "image":
             return BlockType.IMAGE
         return BlockType.PARAGRAPH
@@ -4492,9 +4496,9 @@ class PdfStructureRecoveryService:
         current: _RecoveredBlock,
         pages: list[PdfPage],
     ) -> bool:
-        if previous.role != "body" or current.role != "body":
+        if previous.role not in {"body", "list_item"} or current.role != "body":
             return False
-        if previous.block_type != BlockType.PARAGRAPH or current.block_type != BlockType.PARAGRAPH:
+        if previous.block_type not in {BlockType.PARAGRAPH, BlockType.LIST_ITEM} or current.block_type != BlockType.PARAGRAPH:
             return False
         if current.page_start - previous.page_end > 1:
             return False

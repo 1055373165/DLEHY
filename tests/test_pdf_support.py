@@ -4023,7 +4023,7 @@ class BasicPdfOutlineRecoveryTests(unittest.TestCase):
         bullet_block = next(
             block
             for block in chapter_blocks
-            if block.block_type == BlockType.PARAGRAPH.value
+            if block.block_type in (BlockType.PARAGRAPH.value, BlockType.LIST_ITEM.value)
             and block.text.startswith("• GPT (Byte Pair Encoding):")
         )
 
