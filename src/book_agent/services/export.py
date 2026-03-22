@@ -2759,13 +2759,22 @@ class ExportService:
             return None
 
         column_count = len(normalized_rows[0])
-        if column_count < 2 or column_count > 8:
+        if column_count < 2 or column_count > 12:
             return None
-        if any(len(row) != column_count for row in normalized_rows):
-            return None
+        # Allow rows with slightly mismatched column counts by padding/truncating
+        padded_rows: list[list[str]] = []
+        for row in normalized_rows:
+            if len(row) == column_count:
+                padded_rows.append(row)
+            elif len(row) < column_count:
+                padded_rows.append(row + [""] * (column_count - len(row)))
+            elif len(row) <= column_count + 1:
+                padded_rows.append(row[:column_count])
+            else:
+                return None  # Too many columns — not a table
 
-        header = normalized_rows[0]
-        body_rows = normalized_rows[1:]
+        header = padded_rows[0]
+        body_rows = padded_rows[1:]
         if not body_rows:
             return None
         return header, body_rows
@@ -2787,7 +2796,7 @@ class ExportService:
     def _is_table_separator_row(self, row: list[str]) -> bool:
         if not row:
             return False
-        return all(bool(re.fullmatch(r":?-{2,}:?", cell.strip())) for cell in row)
+        return all(bool(re.fullmatch(r":?-{2,}:?|={2,}", cell.strip())) for cell in row)
 
     def _markdown_language_for_artifact(self, artifact_kind: str | None, text: str) -> str:
         if artifact_kind == "equation":
@@ -5891,11 +5900,28 @@ class ExportService:
         if parsed_rows is None:
             return None
         header, body_rows = parsed_rows
-        thead = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
-        body = "".join(
-            "<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
-            for row in body_rows
-        )
+        # Detect numeric columns for right-alignment
+        alignments: list[str] = []
+        for col_idx in range(len(header)):
+            col_values = [row[col_idx] for row in body_rows if col_idx < len(row) and row[col_idx].strip()]
+            numeric_count = sum(1 for v in col_values if re.fullmatch(r"[\d,.\-+%$€¥£]+", v.strip()))
+            alignments.append("right" if col_values and numeric_count > len(col_values) * 0.6 else "left")
+
+        thead_cells = []
+        for idx, cell in enumerate(header):
+            align = f" style='text-align:{alignments[idx]}'" if idx < len(alignments) else ""
+            thead_cells.append(f"<th{align}>{html.escape(cell)}</th>")
+        thead = "".join(thead_cells)
+
+        body_lines = []
+        for row in body_rows:
+            cells = []
+            for idx, cell in enumerate(row):
+                align = f" style='text-align:{alignments[idx]}'" if idx < len(alignments) else ""
+                cells.append(f"<td{align}>{html.escape(cell)}</td>")
+            body_lines.append("<tr>" + "".join(cells) + "</tr>")
+        body = "".join(body_lines)
+
         return (
             "<div class='artifact-table-shell'>"
             "<table class='artifact-table'>"
