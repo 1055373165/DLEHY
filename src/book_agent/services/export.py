@@ -6302,22 +6302,66 @@ class ExportService:
 
     def _is_dedent_before_code_line(self, stripped: str) -> bool:
         lowered = stripped.lower()
-        return lowered.startswith(("elif ", "else:", "except", "finally:"))
+        # Python
+        if lowered.startswith(("elif ", "else:", "except", "finally:")):
+            return True
+        # C-family / Java / JS / Go
+        if stripped.startswith(("} else", "} catch", "} finally", "} elif")):
+            return True
+        # Standalone closing brace (dedent)
+        if stripped == "}" or stripped == "},":
+            return True
+        # Ruby
+        if lowered.startswith(("elsif ", "rescue ", "ensure ", "end")):
+            return True
+        # Rust
+        if stripped.startswith("} else"):
+            return True
+        return False
 
     def _is_top_level_code_reset(self, stripped: str) -> bool:
         lowered = stripped.lower()
-        return (
-            lowered.startswith(("async def ", "def ", "class ", "from ", "import ", "@", "if __name__"))
-            or stripped.startswith("# ---")
-        )
+        # Python
+        if lowered.startswith(("async def ", "def ", "class ", "from ", "import ", "@", "if __name__")):
+            return True
+        if stripped.startswith("# ---"):
+            return True
+        # Go
+        if lowered.startswith(("func ", "type ", "var ", "const ", "package ")):
+            return True
+        # Rust
+        if lowered.startswith(("pub fn ", "fn ", "pub struct ", "struct ", "impl ", "pub enum ", "enum ", "mod ", "use ")):
+            return True
+        # Java / C# / Kotlin
+        if lowered.startswith(("public ", "private ", "protected ", "static ", "interface ", "abstract ")):
+            return True
+        # C/C++
+        if re.match(r"^(?:int|void|char|double|float|bool|auto|unsigned)\s+\w+\s*\(", stripped):
+            return True
+        if lowered.startswith(("#include", "#define", "#ifndef", "#ifdef", "namespace ", "template ")):
+            return True
+        # JavaScript/TypeScript
+        if lowered.startswith(("export ", "function ", "const ", "let ", "var ")):
+            return True
+        # Ruby
+        if lowered.startswith(("module ", "require ")):
+            return True
+        return False
 
     def _opens_python_block(self, stripped: str) -> bool:
         lowered = stripped.lower()
-        if not stripped.endswith(":"):
-            return False
-        return lowered.startswith(
+        # Python: colon-terminated blocks
+        if stripped.endswith(":") and lowered.startswith(
             ("async def ", "def ", "class ", "if ", "elif ", "else:", "for ", "while ", "try:", "except", "finally:", "with ")
-        )
+        ):
+            return True
+        # C-family / Go / Rust / Java / JS: brace-terminated blocks
+        if stripped.endswith("{"):
+            return True
+        # Ruby: do-blocks
+        if stripped.endswith(("do", "do |")):
+            return True
+        return False
 
     def _continuation_depth_after_code_line(self, stripped: str, current_depth: int) -> int:
         next_depth = max(0, current_depth + self._delimiter_balance(stripped))
@@ -6329,7 +6373,8 @@ class ExportService:
         if self._delimiter_balance(stripped) > 0 or self._has_unterminated_quote(stripped):
             return False
         lowered = stripped.lower()
-        return bool(re.match(r"^(?:return|raise|break|continue|pass)\b(?!\s*:)", lowered))
+        # Python / Rust / Go / JS / Java / C / Ruby
+        return bool(re.match(r"^(?:return|raise|break|continue|pass|throw|yield|panic!?)\b(?!\s*:)", lowered))
 
     def _looks_like_reference_literal(self, text: str) -> bool:
         normalized = (text or "").strip()
