@@ -17,6 +17,7 @@ from book_agent.domain.enums import (
     TargetSegmentStatus,
 )
 from book_agent.domain.models import ArtifactInvalidation, AuditEvent, Sentence
+from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
 from book_agent.infra.repositories.ops import OpsRepository, PacketInvalidationBundle
 from book_agent.orchestrator.rerun import RerunPlan, build_rerun_plan
 
@@ -35,6 +36,7 @@ class ActionExecutionArtifacts:
 class IssueActionExecutor:
     def __init__(self, repository: OpsRepository):
         self.repository = repository
+        self.chapter_memory_repository = ChapterTranslationMemoryRepository(repository.session)
 
     def execute(self, action_id: str) -> ActionExecutionArtifacts:
         action = self.repository.get_issue_action(action_id)
@@ -51,17 +53,30 @@ class IssueActionExecutor:
             for packet_id in rerun_plan.scope_ids:
                 audits.append(self._audit("packet", packet_id, "packet.marked_for_realign", issue.id, now))
         elif rerun_plan.action_type == ActionType.REPARSE_CHAPTER and rerun_plan.scope_type == JobScopeType.CHAPTER:
+            self._reject_pending_packet_proposals(
+                packet.id
+                for chapter_id in rerun_plan.scope_ids
+                for packet in self.repository.list_packets_for_chapter(chapter_id)
+            )
             for chapter_id in rerun_plan.scope_ids:
                 audits.append(self._audit("chapter", chapter_id, "chapter.marked_for_reparse", issue.id, now))
         elif rerun_plan.action_type == ActionType.REPARSE_DOCUMENT and rerun_plan.scope_type == JobScopeType.DOCUMENT:
+            self._reject_pending_packet_proposals(
+                packet.id
+                for document_id in rerun_plan.scope_ids
+                for packet in self.repository.list_packets_for_document(document_id)
+            )
             for document_id in rerun_plan.scope_ids:
                 audits.append(self._audit("document", document_id, "document.marked_for_reparse", issue.id, now))
         elif rerun_plan.scope_type == JobScopeType.PACKET:
+            self._reject_pending_packet_proposals(rerun_plan.scope_ids)
             for packet_id in rerun_plan.scope_ids:
                 invalidations.extend(self._invalidate_packet_scope(packet_id, issue.id, now))
         elif rerun_plan.scope_type == JobScopeType.CHAPTER:
             for chapter_id in rerun_plan.scope_ids:
-                for bundle in self.repository.list_packet_bundles_for_chapter(chapter_id):
+                chapter_packet_bundles = self.repository.list_packet_bundles_for_chapter(chapter_id)
+                self._reject_pending_packet_proposals(bundle.packet.id for bundle in chapter_packet_bundles)
+                for bundle in chapter_packet_bundles:
                     invalidations.extend(self._invalidate_packet_bundle(bundle, issue.id, now))
                 chapter = self.repository.get_chapter(chapter_id)
                 chapter.status = ChapterStatus.PACKET_BUILT
@@ -75,6 +90,15 @@ class IssueActionExecutor:
         self.repository.save_invalidations(action, invalidations, audits)
         self.repository.session.flush()
         return ActionExecutionArtifacts(rerun_plan=rerun_plan, invalidations=invalidations, audits=audits)
+
+    def _reject_pending_packet_proposals(self, packet_ids) -> None:
+        seen_packet_ids: set[str] = set()
+        for packet_id in packet_ids:
+            normalized_packet_id = str(packet_id or "").strip()
+            if not normalized_packet_id or normalized_packet_id in seen_packet_ids:
+                continue
+            seen_packet_ids.add(normalized_packet_id)
+            self.chapter_memory_repository.retire_pending_proposals_for_packet(packet_id=normalized_packet_id)
 
     def _invalidate_packet_scope(self, packet_id: str, issue_id: str, now: datetime) -> list[ArtifactInvalidation]:
         bundle = self.repository.get_packet_bundle(packet_id)

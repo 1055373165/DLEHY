@@ -62,6 +62,18 @@ class OpsRepository:
             select(TranslationPacket).where(TranslationPacket.chapter_id == chapter_id).order_by(TranslationPacket.id)
         ).all()
 
+    def list_packets_for_document(self, document_id: str) -> list[TranslationPacket]:
+        chapter_ids = self.session.scalars(
+            select(Chapter.id).where(Chapter.document_id == document_id).order_by(Chapter.ordinal)
+        ).all()
+        if not chapter_ids:
+            return []
+        return self.session.scalars(
+            select(TranslationPacket)
+            .where(TranslationPacket.chapter_id.in_(chapter_ids))
+            .order_by(TranslationPacket.chapter_id, TranslationPacket.id)
+        ).all()
+
     def get_packet(self, packet_id: str) -> TranslationPacket:
         packet = self.session.get(TranslationPacket, packet_id)
         if packet is None:

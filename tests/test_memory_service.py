@@ -14,6 +14,8 @@ if str(SRC) not in sys.path:
 
 from book_agent.core.ids import stable_id
 from book_agent.domain.enums import (
+    ActionActorType,
+    ActionStatus,
     ActionType,
     ChapterStatus,
     Detector,
@@ -28,7 +30,7 @@ from book_agent.domain.enums import (
     SnapshotType,
 )
 from book_agent.domain.models import Chapter, ChapterMemoryProposal, MemorySnapshot
-from book_agent.domain.models.review import ReviewIssue
+from book_agent.domain.models.review import IssueAction, ReviewIssue
 from book_agent.domain.models.translation import AlignmentEdge, TargetSegment, TranslationPacket, TranslationRun
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
@@ -40,6 +42,7 @@ from book_agent.infra.repositories.translation import TranslationRepository
 from book_agent.orchestrator.bootstrap import BootstrapOrchestrator
 from book_agent.orchestrator.rerun import RerunPlan
 from book_agent.services.context_compile import ChapterContextCompiler
+from book_agent.services.actions import IssueActionExecutor
 from book_agent.services.memory_service import MemoryService
 from book_agent.services.realign import RealignService
 from book_agent.services.rebuild import TargetedRebuildService
@@ -590,6 +593,145 @@ class MemoryServiceTests(unittest.TestCase):
             self.assertEqual(len(proposals), 2)
             self.assertEqual(proposals[0].status, MemoryProposalStatus.REJECTED)
             self.assertEqual(proposals[1].status, MemoryProposalStatus.COMMITTED)
+
+    def test_action_execution_rejects_pending_packet_proposals_before_followup(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        target_packet_id = self._find_packet_with_text(packet_ids, "created")
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            translation_repository = TranslationRepository(session)
+            translation_service = TranslationService(translation_repository)
+            artifacts = translation_service.execute_packet(target_packet_id, auto_commit_memory=False)
+
+            now = datetime.now(timezone.utc)
+            issue = ReviewIssue(
+                id=stable_id("review-issue", document_id, chapter.id, target_packet_id, "action-proposal"),
+                document_id=document_id,
+                chapter_id=chapter.id,
+                block_id=None,
+                sentence_id=None,
+                packet_id=target_packet_id,
+                issue_type="CONTEXT_FAILURE",
+                root_cause_layer=RootCauseLayer.PACKET,
+                severity=Severity.HIGH,
+                blocking=True,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={"reason": "manual action execution"},
+                status=IssueStatus.OPEN,
+                suggested_action=None,
+                resolution_note=None,
+                created_at=now,
+                updated_at=now,
+            )
+            action = IssueAction(
+                id=stable_id("issue-action", issue.id, ActionType.REBUILD_PACKET_THEN_RERUN.value),
+                issue_id=issue.id,
+                action_type=ActionType.REBUILD_PACKET_THEN_RERUN,
+                scope_type=JobScopeType.PACKET,
+                scope_id=target_packet_id,
+                status=ActionStatus.PLANNED,
+                reason_json={"issue_type": issue.issue_type, "packet_id": target_packet_id},
+                created_by=ActionActorType.SYSTEM,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(issue)
+            session.flush()
+            session.add(action)
+            session.flush()
+
+            execution = IssueActionExecutor(OpsRepository(session)).execute(action.id)
+            session.commit()
+
+            self.assertEqual(execution.rerun_plan.scope_ids, [target_packet_id])
+            self.assertGreaterEqual(len(execution.invalidations), 1)
+
+        with self.session_factory() as session:
+            proposal = session.scalars(
+                select(ChapterMemoryProposal).where(
+                    ChapterMemoryProposal.translation_run_id == artifacts.translation_run.id
+                )
+            ).first()
+            packet = session.get(TranslationPacket, target_packet_id)
+
+            self.assertIsNotNone(proposal)
+            self.assertIsNotNone(packet)
+            assert proposal is not None
+            assert packet is not None
+            self.assertEqual(proposal.status, MemoryProposalStatus.REJECTED)
+            self.assertEqual(packet.status, PacketStatus.INVALIDATED)
+
+    def test_action_execution_rejects_pending_chapter_proposals_for_chapter_scope(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            translation_repository = TranslationRepository(session)
+            translation_service = TranslationService(translation_repository)
+            for packet_id in packet_ids:
+                translation_service.execute_packet(packet_id, auto_commit_memory=False)
+
+            now = datetime.now(timezone.utc)
+            issue = ReviewIssue(
+                id=stable_id("review-issue", document_id, chapter.id, "chapter-scope", "action-proposal"),
+                document_id=document_id,
+                chapter_id=chapter.id,
+                block_id=None,
+                sentence_id=None,
+                packet_id=None,
+                issue_type="CHAPTER_CONTEXT_FAILURE",
+                root_cause_layer=RootCauseLayer.MEMORY,
+                severity=Severity.HIGH,
+                blocking=True,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={"reason": "manual chapter action execution"},
+                status=IssueStatus.OPEN,
+                suggested_action=None,
+                resolution_note=None,
+                created_at=now,
+                updated_at=now,
+            )
+            action = IssueAction(
+                id=stable_id("issue-action", issue.id, ActionType.REBUILD_CHAPTER_BRIEF.value),
+                issue_id=issue.id,
+                action_type=ActionType.REBUILD_CHAPTER_BRIEF,
+                scope_type=JobScopeType.CHAPTER,
+                scope_id=chapter.id,
+                status=ActionStatus.PLANNED,
+                reason_json={"issue_type": issue.issue_type},
+                created_by=ActionActorType.SYSTEM,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(issue)
+            session.flush()
+            session.add(action)
+            session.flush()
+
+            execution = IssueActionExecutor(OpsRepository(session)).execute(action.id)
+            session.commit()
+
+            self.assertEqual(execution.rerun_plan.scope_ids, [chapter.id])
+            self.assertGreaterEqual(len(execution.invalidations), len(packet_ids))
+
+        with self.session_factory() as session:
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+
+            self.assertEqual(len(proposals), len(packet_ids))
+            self.assertTrue(all(proposal.status == MemoryProposalStatus.REJECTED for proposal in proposals))
 
     def test_review_pass_commits_pending_chapter_memory_proposals_in_packet_order(self) -> None:
         document_id, packet_ids = self._bootstrap_to_db()
