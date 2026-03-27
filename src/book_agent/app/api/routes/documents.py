@@ -16,11 +16,14 @@ from starlette.background import BackgroundTask
 from book_agent.app.api.deps import get_db_session
 from book_agent.core.config import get_settings
 from book_agent.domain.document_titles import document_display_title, safe_title_for_filename
-from book_agent.domain.enums import DocumentRunStatus, DocumentStatus, ExportStatus, ExportType, SourceType
+from book_agent.domain.enums import DocumentRunStatus, DocumentStatus, ExportStatus, ExportType, MemoryProposalStatus, SourceType
 from book_agent.infra.db.legacy_backfill import backfill_legacy_history
 from book_agent.schemas.document import DocumentContractResponse
 from book_agent.schemas.workflow import (
     BootstrapDocumentRequest,
+    ChapterMemoryProposalResponse,
+    ChapterMemoryProposalDecisionResponse,
+    ChapterMemoryProposalListResponse,
     ChapterWorklistAssignmentClearRequest,
     ChapterWorklistAssignmentClearResponse,
     ChapterWorklistAssignmentRequest,
@@ -45,6 +48,8 @@ from book_agent.services.workflows import (
     DocumentExportDashboard,
     DocumentHistoryPage,
     ExportDetail,
+    ChapterMemoryProposalDecisionResult,
+    ChapterMemoryProposalSummary,
     DocumentExportResult,
     DocumentReviewResult,
     DocumentSummary,
@@ -692,6 +697,58 @@ def _to_translate_response(result: DocumentTranslationResult) -> TranslateDocume
         memory_commit_mode=result.memory_commit_mode,
         recorded_memory_proposal_count=result.recorded_memory_proposal_count,
     )
+
+
+def _to_chapter_memory_proposal_response(
+    proposal: ChapterMemoryProposalSummary,
+) -> ChapterMemoryProposalResponse:
+    return ChapterMemoryProposalResponse(
+        proposal_id=proposal.proposal_id,
+        packet_id=proposal.packet_id,
+        translation_run_id=proposal.translation_run_id,
+        status=proposal.status,
+        base_snapshot_version=proposal.base_snapshot_version,
+        committed_snapshot_id=proposal.committed_snapshot_id,
+        created_at=proposal.created_at,
+        updated_at=proposal.updated_at,
+    )
+
+
+def _to_chapter_memory_proposal_list_response(
+    *,
+    document_id: str,
+    chapter_id: str,
+    status_filter: str | None,
+    proposals: list[ChapterMemoryProposalSummary],
+) -> ChapterMemoryProposalListResponse:
+    return ChapterMemoryProposalListResponse(
+        document_id=document_id,
+        chapter_id=chapter_id,
+        status_filter=status_filter,  # type: ignore[arg-type]
+        proposal_count=len(proposals),
+        proposals=[_to_chapter_memory_proposal_response(proposal) for proposal in proposals],
+    )
+
+
+def _to_chapter_memory_proposal_decision_response(
+    result: ChapterMemoryProposalDecisionResult,
+) -> ChapterMemoryProposalDecisionResponse:
+    return ChapterMemoryProposalDecisionResponse(
+        document_id=result.document_id,
+        chapter_id=result.chapter_id,
+        decision=result.decision,  # type: ignore[arg-type]
+        proposal=_to_chapter_memory_proposal_response(result.proposal),
+        committed_snapshot_id=result.committed_snapshot_id,
+        committed_snapshot_version=result.committed_snapshot_version,
+    )
+
+
+def _proposal_http_exception(exc: ValueError) -> HTTPException:
+    message = str(exc)
+    lowered = message.casefold()
+    if "not found" in lowered or "does not belong" in lowered:
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
 def _to_review_response(result: DocumentReviewResult) -> ReviewDocumentResponse:
@@ -1535,6 +1592,77 @@ def get_document_export_detail(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _to_export_detail_response(detail)
+
+
+@router.get(
+    "/{document_id}/chapters/{chapter_id}/memory-proposals",
+    response_model=ChapterMemoryProposalListResponse,
+)
+def list_chapter_memory_proposals(
+    document_id: str,
+    chapter_id: str,
+    request: Request,
+    proposal_status: MemoryProposalStatus | None = Query(default=None, alias="status"),
+    session: Session = Depends(get_db_session),
+) -> ChapterMemoryProposalListResponse:
+    try:
+        proposals = _workflow_service(request, session).list_chapter_memory_proposals(
+            document_id,
+            chapter_id,
+            status=proposal_status.value if proposal_status is not None else None,
+        )
+    except ValueError as exc:
+        raise _proposal_http_exception(exc) from exc
+    return _to_chapter_memory_proposal_list_response(
+        document_id=document_id,
+        chapter_id=chapter_id,
+        status_filter=proposal_status.value if proposal_status is not None else None,
+        proposals=proposals,
+    )
+
+
+@router.post(
+    "/{document_id}/chapters/{chapter_id}/memory-proposals/{proposal_id}/approve",
+    response_model=ChapterMemoryProposalDecisionResponse,
+)
+def approve_chapter_memory_proposal(
+    document_id: str,
+    chapter_id: str,
+    proposal_id: str,
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> ChapterMemoryProposalDecisionResponse:
+    try:
+        result = _workflow_service(request, session).approve_chapter_memory_proposal(
+            document_id,
+            chapter_id,
+            proposal_id,
+        )
+    except ValueError as exc:
+        raise _proposal_http_exception(exc) from exc
+    return _to_chapter_memory_proposal_decision_response(result)
+
+
+@router.post(
+    "/{document_id}/chapters/{chapter_id}/memory-proposals/{proposal_id}/reject",
+    response_model=ChapterMemoryProposalDecisionResponse,
+)
+def reject_chapter_memory_proposal(
+    document_id: str,
+    chapter_id: str,
+    proposal_id: str,
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> ChapterMemoryProposalDecisionResponse:
+    try:
+        result = _workflow_service(request, session).reject_chapter_memory_proposal(
+            document_id,
+            chapter_id,
+            proposal_id,
+        )
+    except ValueError as exc:
+        raise _proposal_http_exception(exc) from exc
+    return _to_chapter_memory_proposal_decision_response(result)
 
 
 @router.post("/{document_id}/translate", response_model=TranslateDocumentResponse)

@@ -125,6 +125,34 @@ class TranslateDocumentResponse(BaseSchema):
     recorded_memory_proposal_count: int = 0
 
 
+class ChapterMemoryProposalResponse(BaseSchema):
+    proposal_id: str
+    packet_id: str
+    translation_run_id: str
+    status: str
+    base_snapshot_version: int | None = None
+    committed_snapshot_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ChapterMemoryProposalListResponse(BaseSchema):
+    document_id: str
+    chapter_id: str
+    status_filter: Literal["proposed", "committed", "rejected"] | None = None
+    proposal_count: int
+    proposals: list[ChapterMemoryProposalResponse] = Field(default_factory=list)
+
+
+class ChapterMemoryProposalDecisionResponse(BaseSchema):
+    document_id: str
+    chapter_id: str
+    decision: Literal["approved", "rejected"]
+    proposal: ChapterMemoryProposalResponse
+    committed_snapshot_id: str | None = None
+    committed_snapshot_version: int | None = None
+
+
 class ChapterReviewResultResponse(BaseSchema):
     chapter_id: str
     status: str

@@ -39,6 +39,7 @@ from book_agent.domain.enums import (
     IssueStatus,
     JobScopeType,
     LockLevel,
+    MemoryProposalStatus,
     MemoryScopeType,
     RootCauseLayer,
     SentenceStatus,
@@ -733,6 +734,22 @@ class ApiWorkflowTests(unittest.TestCase):
 </html>
 """
 
+    def _bootstrap_document_with_first_packet(self) -> tuple[str, str, str]:
+        epub_path = self._write_epub()
+        bootstrap = self.client.post("/v1/documents/bootstrap", json={"source_path": str(epub_path)})
+        self.assertEqual(bootstrap.status_code, 201)
+        payload = bootstrap.json()
+        document_id = payload["document_id"]
+        chapter_id = payload["chapters"][0]["chapter_id"]
+        with self.session_factory() as session:
+            packet_id = session.scalars(
+                select(TranslationPacket.id)
+                .where(TranslationPacket.chapter_id == chapter_id)
+                .order_by(TranslationPacket.created_at.asc())
+            ).first()
+        assert packet_id is not None
+        return document_id, chapter_id, packet_id
+
     def test_document_api_happy_path(self) -> None:
         epub_path = self._write_epub()
 
@@ -776,6 +793,88 @@ class ApiWorkflowTests(unittest.TestCase):
         self.assertEqual(summary_data["status"], "exported")
         self.assertIsNotNone(summary_data["chapters"][0]["quality_summary"])
         self.assertTrue(summary_data["chapters"][0]["quality_summary"]["coverage_ok"])
+
+    def test_memory_proposal_api_can_list_and_reject_pending_proposal(self) -> None:
+        document_id, chapter_id, packet_id = self._bootstrap_document_with_first_packet()
+
+        translate = self.client.post(
+            f"/v1/documents/{document_id}/translate",
+            json={"packet_ids": [packet_id]},
+        )
+        self.assertEqual(translate.status_code, 200)
+        self.assertEqual(translate.json()["translated_packet_count"], 1)
+
+        pending = self.client.get(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals",
+            params={"status": "proposed"},
+        )
+        self.assertEqual(pending.status_code, 200)
+        pending_payload = pending.json()
+        self.assertEqual(pending_payload["status_filter"], "proposed")
+        self.assertEqual(pending_payload["proposal_count"], 1)
+        proposal = pending_payload["proposals"][0]
+        self.assertEqual(proposal["packet_id"], packet_id)
+        self.assertEqual(proposal["status"], MemoryProposalStatus.PROPOSED.value)
+
+        rejected = self.client.post(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals/{proposal['proposal_id']}/reject"
+        )
+        self.assertEqual(rejected.status_code, 200)
+        rejected_payload = rejected.json()
+        self.assertEqual(rejected_payload["decision"], "rejected")
+        self.assertEqual(rejected_payload["proposal"]["status"], MemoryProposalStatus.REJECTED.value)
+        self.assertIsNone(rejected_payload["committed_snapshot_id"])
+
+        pending_after = self.client.get(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals",
+            params={"status": "proposed"},
+        )
+        self.assertEqual(pending_after.status_code, 200)
+        self.assertEqual(pending_after.json()["proposal_count"], 0)
+
+        rejected_list = self.client.get(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals",
+            params={"status": "rejected"},
+        )
+        self.assertEqual(rejected_list.status_code, 200)
+        self.assertEqual(rejected_list.json()["proposal_count"], 1)
+
+    def test_memory_proposal_api_can_approve_pending_proposal(self) -> None:
+        document_id, chapter_id, packet_id = self._bootstrap_document_with_first_packet()
+
+        translate = self.client.post(
+            f"/v1/documents/{document_id}/translate",
+            json={"packet_ids": [packet_id]},
+        )
+        self.assertEqual(translate.status_code, 200)
+        self.assertEqual(translate.json()["translated_packet_count"], 1)
+
+        pending = self.client.get(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals",
+            params={"status": "proposed"},
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.json()["proposal_count"], 1)
+        proposal = pending.json()["proposals"][0]
+
+        approved = self.client.post(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals/{proposal['proposal_id']}/approve"
+        )
+        self.assertEqual(approved.status_code, 200)
+        approved_payload = approved.json()
+        self.assertEqual(approved_payload["decision"], "approved")
+        self.assertEqual(approved_payload["proposal"]["status"], MemoryProposalStatus.COMMITTED.value)
+        self.assertIsNotNone(approved_payload["committed_snapshot_id"])
+        self.assertIsNotNone(approved_payload["committed_snapshot_version"])
+
+        committed = self.client.get(
+            f"/v1/documents/{document_id}/chapters/{chapter_id}/memory-proposals",
+            params={"status": "committed"},
+        )
+        self.assertEqual(committed.status_code, 200)
+        committed_payload = committed.json()
+        self.assertEqual(committed_payload["proposal_count"], 1)
+        self.assertEqual(committed_payload["proposals"][0]["proposal_id"], proposal["proposal_id"])
 
     def test_bootstrap_upload_accepts_epub_file(self) -> None:
         epub_path = self._write_epub()
