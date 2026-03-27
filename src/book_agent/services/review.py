@@ -135,6 +135,7 @@ class ReviewService:
             bundle.chapter.risk_level = structure_severity
         if artifacts.summary.blocking_issue_count > 0:
             bundle.chapter.status = ChapterStatus.REVIEW_REQUIRED
+            self._reject_review_blocked_memory(bundle, artifacts)
         else:
             bundle.chapter.status = ChapterStatus.QA_CHECKED
             self._commit_review_approved_memory(bundle)
@@ -168,6 +169,26 @@ class ReviewService:
             chapter_id=bundle.chapter.id,
             approved_translation_run_ids=latest_run_ids_by_packet.values(),
         )
+
+    def _reject_review_blocked_memory(
+        self,
+        bundle: ChapterReviewBundle,
+        artifacts: ReviewArtifacts,
+    ) -> None:
+        rejected_packet_ids: set[str] = set()
+        known_packet_ids = {packet.id for packet in bundle.packets}
+        for issue in artifacts.issues:
+            if not issue.blocking:
+                continue
+            if issue.packet_id:
+                rejected_packet_ids.add(issue.packet_id)
+            for packet_id in list((issue.evidence_json or {}).get("packet_ids_seen") or []):
+                normalized_packet_id = str(packet_id or "").strip()
+                if normalized_packet_id and normalized_packet_id in known_packet_ids:
+                    rejected_packet_ids.add(normalized_packet_id)
+        if not rejected_packet_ids:
+            return
+        self.memory_service.reject_pending_packet_proposals(packet_ids=sorted(rejected_packet_ids))
 
     def _should_suppress_fragmentary_pdf_omission(self, sentence, block) -> bool:
         if block is None:

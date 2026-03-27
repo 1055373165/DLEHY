@@ -1,28 +1,49 @@
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from book_agent.domain.enums import ChapterStatus, MemoryProposalStatus, MemoryScopeType, MemoryStatus, PacketStatus, SnapshotType
+from book_agent.core.ids import stable_id
+from book_agent.domain.enums import (
+    ActionType,
+    ChapterStatus,
+    Detector,
+    IssueStatus,
+    JobScopeType,
+    MemoryProposalStatus,
+    MemoryScopeType,
+    MemoryStatus,
+    PacketStatus,
+    RootCauseLayer,
+    Severity,
+    SnapshotType,
+)
 from book_agent.domain.models import Chapter, ChapterMemoryProposal, MemorySnapshot
-from book_agent.domain.models.translation import TranslationPacket, TranslationRun
+from book_agent.domain.models.review import ReviewIssue
+from book_agent.domain.models.translation import AlignmentEdge, TargetSegment, TranslationPacket, TranslationRun
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.infra.repositories.bootstrap import BootstrapRepository
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
+from book_agent.infra.repositories.ops import OpsRepository
 from book_agent.infra.repositories.review import ReviewRepository
 from book_agent.infra.repositories.translation import TranslationRepository
 from book_agent.orchestrator.bootstrap import BootstrapOrchestrator
+from book_agent.orchestrator.rerun import RerunPlan
 from book_agent.services.context_compile import ChapterContextCompiler
 from book_agent.services.memory_service import MemoryService
+from book_agent.services.realign import RealignService
+from book_agent.services.rebuild import TargetedRebuildService
+from book_agent.services.rerun import RerunService
 from book_agent.services.review import ReviewService
 from book_agent.services.translation import TranslationService
 from book_agent.services.workflows import DocumentWorkflowService
@@ -445,6 +466,130 @@ class MemoryServiceTests(unittest.TestCase):
             self.assertIsNotNone(latest_snapshot)
             assert latest_snapshot is not None
             self.assertEqual(latest_snapshot.version, 2)
+
+    def test_review_blocking_rejects_pending_proposals_for_affected_packets(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        affected_packet_id = self._find_packet_with_text(packet_ids, "created")
+        unaffected_packet_id = next(packet_id for packet_id in packet_ids if packet_id != affected_packet_id)
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            repository = TranslationRepository(session)
+            service = TranslationService(repository)
+            for packet_id in packet_ids:
+                service.execute_packet(packet_id, auto_commit_memory=False)
+
+            latest_run = session.scalars(
+                select(TranslationRun)
+                .where(TranslationRun.packet_id == affected_packet_id)
+                .order_by(TranslationRun.attempt.desc())
+            ).first()
+            assert latest_run is not None
+            target_segment_ids = session.scalars(
+                select(TargetSegment.id).where(TargetSegment.translation_run_id == latest_run.id)
+            ).all()
+            session.execute(delete(AlignmentEdge).where(AlignmentEdge.target_segment_id.in_(target_segment_ids)))
+
+            review_artifacts = ReviewService(ReviewRepository(session)).review_chapter(chapter.id)
+            session.commit()
+
+            self.assertGreater(review_artifacts.summary.blocking_issue_count, 0)
+            self.assertTrue(
+                any(issue.packet_id == affected_packet_id and issue.blocking for issue in review_artifacts.issues)
+            )
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+            proposal_by_packet = {proposal.packet_id: proposal for proposal in proposals}
+
+            self.assertEqual(chapter.status, ChapterStatus.REVIEW_REQUIRED)
+            self.assertEqual(proposal_by_packet[affected_packet_id].status, MemoryProposalStatus.REJECTED)
+            self.assertEqual(proposal_by_packet[unaffected_packet_id].status, MemoryProposalStatus.PROPOSED)
+
+    def test_rerun_execution_rejects_stale_packet_proposals_before_retranslation(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        target_packet_id = self._find_packet_with_text(packet_ids, "created")
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            translation_repository = TranslationRepository(session)
+            translation_service = TranslationService(translation_repository)
+            for packet_id in packet_ids:
+                translation_service.execute_packet(packet_id, auto_commit_memory=False)
+
+            now = datetime.now(timezone.utc)
+            issue = ReviewIssue(
+                id=stable_id("review-issue", document_id, chapter.id, target_packet_id, "rerun-proposal"),
+                document_id=document_id,
+                chapter_id=chapter.id,
+                block_id=None,
+                sentence_id=None,
+                packet_id=target_packet_id,
+                issue_type="STYLE_DRIFT",
+                root_cause_layer=RootCauseLayer.TRANSLATION,
+                severity=Severity.MEDIUM,
+                blocking=False,
+                detector=Detector.RULE,
+                confidence=1.0,
+                evidence_json={"preferred_hint": "Prefer natural Chinese phrasing."},
+                status=IssueStatus.OPEN,
+                suggested_action=None,
+                resolution_note=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(issue)
+            session.flush()
+
+            rerun_service = RerunService(
+                ops_repository=OpsRepository(session),
+                translation_service=translation_service,
+                review_service=ReviewService(ReviewRepository(session)),
+                targeted_rebuild_service=TargetedRebuildService(
+                    session=session,
+                    bootstrap_repository=BootstrapRepository(session),
+                ),
+                realign_service=RealignService(OpsRepository(session)),
+            )
+            execution = rerun_service.execute(
+                RerunPlan(
+                    issue_id=issue.id,
+                    action_type=ActionType.RERUN_PACKET,
+                    scope_type=JobScopeType.PACKET,
+                    scope_ids=[target_packet_id],
+                )
+            )
+            session.commit()
+
+            self.assertEqual(execution.translated_packet_ids, [target_packet_id])
+            self.assertEqual(len(execution.translation_run_ids), 1)
+            self.assertTrue(execution.issue_resolved)
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.packet_id == target_packet_id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+
+            self.assertEqual(chapter.status, ChapterStatus.QA_CHECKED)
+            self.assertEqual(len(proposals), 2)
+            self.assertEqual(proposals[0].status, MemoryProposalStatus.REJECTED)
+            self.assertEqual(proposals[1].status, MemoryProposalStatus.COMMITTED)
 
     def test_review_pass_commits_pending_chapter_memory_proposals_in_packet_order(self) -> None:
         document_id, packet_ids = self._bootstrap_to_db()

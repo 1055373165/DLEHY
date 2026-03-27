@@ -90,6 +90,25 @@ class MemoryService:
             proposed_content_json=proposed_content_json,
         )
 
+    def reject_pending_packet_proposals(
+        self,
+        *,
+        packet_ids: Iterable[str],
+    ) -> list[ChapterMemoryProposal]:
+        retired: list[ChapterMemoryProposal] = []
+        seen_packet_ids: set[str] = set()
+        for packet_id in packet_ids:
+            normalized_packet_id = str(packet_id or "").strip()
+            if not normalized_packet_id or normalized_packet_id in seen_packet_ids:
+                continue
+            seen_packet_ids.add(normalized_packet_id)
+            retired.extend(
+                self.chapter_memory_repository.retire_pending_proposals_for_packet(
+                    packet_id=normalized_packet_id,
+                )
+            )
+        return retired
+
     def commit_approved_packet_memory(
         self,
         *,

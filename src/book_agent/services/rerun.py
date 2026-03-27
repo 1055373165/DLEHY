@@ -103,6 +103,7 @@ class RerunService:
             packet_ids = (
                 rebuild_artifacts.rebuilt_packet_ids if rebuild_artifacts else self._packet_ids_for_plan(effective_rerun_plan)
             )
+            self.translation_service.memory_service.reject_pending_packet_proposals(packet_ids=packet_ids)
 
             for packet_id in packet_ids:
                 packet = self.ops_repository.mark_packet_ready_for_rerun(packet_id)
