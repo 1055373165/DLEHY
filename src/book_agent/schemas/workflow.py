@@ -121,6 +121,8 @@ class TranslateDocumentResponse(BaseSchema):
     skipped_packet_ids: list[str] = Field(default_factory=list)
     translation_run_ids: list[str] = Field(default_factory=list)
     review_required_sentence_ids: list[str] = Field(default_factory=list)
+    memory_commit_mode: str = "proposal_first"
+    recorded_memory_proposal_count: int = 0
 
 
 class ChapterReviewResultResponse(BaseSchema):

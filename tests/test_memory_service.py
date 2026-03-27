@@ -458,7 +458,7 @@ class MemoryServiceTests(unittest.TestCase):
 
         with self.session_factory() as session:
             workflow = DocumentWorkflowService(session)
-            workflow.translate_document(document_id)
+            translate_result = workflow.translate_document(document_id)
             session.commit()
 
             chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
@@ -485,6 +485,8 @@ class MemoryServiceTests(unittest.TestCase):
             self.assertIsNotNone(latest_snapshot)
             assert latest_snapshot is not None
             self.assertEqual(latest_snapshot.version, 2)
+            self.assertEqual(translate_result.memory_commit_mode, "proposal_first")
+            self.assertEqual(translate_result.recorded_memory_proposal_count, translate_result.translated_packet_count)
 
             review = workflow.review_document(document_id)
             session.commit()

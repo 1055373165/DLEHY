@@ -260,6 +260,7 @@ class TranslationService:
         chapter_memory_repository: ChapterTranslationMemoryRepository | None = None,
         context_compiler: ChapterContextCompiler | None = None,
         memory_service: MemoryService | None = None,
+        default_auto_commit_memory: bool = True,
     ):
         self.repository = repository
         self.worker = worker or EchoTranslationWorker()
@@ -271,6 +272,7 @@ class TranslationService:
             chapter_memory_repository=self.chapter_memory_repository,
             context_compiler=self.context_compiler,
         )
+        self.default_auto_commit_memory = default_auto_commit_memory
 
     def execute_packet(
         self,
@@ -278,8 +280,11 @@ class TranslationService:
         *,
         compile_options: ChapterContextCompileOptions | None = None,
         rerun_hints: tuple[str, ...] = (),
-        auto_commit_memory: bool = True,
+        auto_commit_memory: bool | None = None,
     ) -> TranslationExecutionArtifacts:
+        effective_auto_commit_memory = (
+            self.default_auto_commit_memory if auto_commit_memory is None else auto_commit_memory
+        )
         bundle = self.repository.load_packet_bundle(packet_id)
         compiled_context_result = self.memory_service.load_compiled_context(
             packet=bundle.context_packet,
@@ -318,7 +323,7 @@ class TranslationService:
             current_snapshot=chapter_memory_snapshot,
             proposed_content_json=proposed_content_json,
         )
-        if auto_commit_memory:
+        if effective_auto_commit_memory:
             self.memory_service.commit_approved_packet_memory(
                 document_id=bundle.context_packet.document_id,
                 chapter_id=bundle.context_packet.chapter_id,

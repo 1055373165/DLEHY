@@ -108,6 +108,8 @@ class CliWorkflowTests(unittest.TestCase):
                 document_id,
             )
             self.assertEqual(translate_data["translated_packet_count"], 3)
+            self.assertEqual(translate_data["memory_commit_mode"], "proposal_first")
+            self.assertEqual(translate_data["recorded_memory_proposal_count"], 3)
 
             review_data = self._run_cli(
                 "--database-url",

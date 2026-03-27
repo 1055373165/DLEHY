@@ -181,6 +181,8 @@ class DocumentTranslationResult:
     skipped_packet_ids: list[str]
     translation_run_ids: list[str]
     review_required_sentence_ids: list[str]
+    memory_commit_mode: str
+    recorded_memory_proposal_count: int
 
 
 def _display_author_value(author: str | None) -> str | None:
@@ -774,6 +776,7 @@ class DocumentWorkflowService:
         session: Session,
         export_root: str | Path = "artifacts/exports",
         translation_worker: TranslationWorker | None = None,
+        translation_auto_commit_memory: bool = False,
     ):
         self.session = session
         self.bootstrap_repository = BootstrapRepository(session)
@@ -787,6 +790,7 @@ class DocumentWorkflowService:
         self.translation_service = TranslationService(
             TranslationRepository(session),
             worker=translation_worker,
+            default_auto_commit_memory=translation_auto_commit_memory,
         )
         self.review_service = ReviewService(self.review_repository)
         self.export_service = ExportService(
@@ -1203,6 +1207,7 @@ class DocumentWorkflowService:
         bundle = self.bootstrap_repository.load_document_bundle(document_id)
         requested_packet_ids = set(packet_ids or [])
         translated_packet_count = 0
+        recorded_memory_proposal_count = 0
         translation_run_ids: list[str] = []
         review_required_sentence_ids: list[str] = []
         skipped_packet_ids: list[str] = []
@@ -1217,11 +1222,9 @@ class DocumentWorkflowService:
             if packet.status != PacketStatus.BUILT:
                 skipped_packet_ids.append(packet.id)
                 continue
-            artifacts: TranslationExecutionArtifacts = self.translation_service.execute_packet(
-                packet.id,
-                auto_commit_memory=False,
-            )
+            artifacts: TranslationExecutionArtifacts = self.translation_service.execute_packet(packet.id)
             translated_packet_count += 1
+            recorded_memory_proposal_count += 1
             translation_run_ids.append(artifacts.translation_run.id)
             review_required_sentence_ids.extend(
                 sentence.id for sentence in artifacts.updated_sentences if sentence.sentence_status.value == "review_required"
@@ -1233,6 +1236,10 @@ class DocumentWorkflowService:
             skipped_packet_ids=skipped_packet_ids,
             translation_run_ids=translation_run_ids,
             review_required_sentence_ids=review_required_sentence_ids,
+            memory_commit_mode=(
+                "eager_commit" if self.translation_service.default_auto_commit_memory else "proposal_first"
+            ),
+            recorded_memory_proposal_count=recorded_memory_proposal_count,
         )
 
     def _review_document_impl(

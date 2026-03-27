@@ -689,6 +689,8 @@ def _to_translate_response(result: DocumentTranslationResult) -> TranslateDocume
         skipped_packet_ids=result.skipped_packet_ids,
         translation_run_ids=result.translation_run_ids,
         review_required_sentence_ids=result.review_required_sentence_ids,
+        memory_commit_mode=result.memory_commit_mode,
+        recorded_memory_proposal_count=result.recorded_memory_proposal_count,
     )
 
 

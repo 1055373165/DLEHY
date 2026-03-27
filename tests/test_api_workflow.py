@@ -752,6 +752,8 @@ class ApiWorkflowTests(unittest.TestCase):
         translate = self.client.post(f"/v1/documents/{document_id}/translate", json={})
         self.assertEqual(translate.status_code, 200)
         self.assertEqual(translate.json()["translated_packet_count"], 3)
+        self.assertEqual(translate.json()["memory_commit_mode"], "proposal_first")
+        self.assertEqual(translate.json()["recorded_memory_proposal_count"], 3)
 
         review = self.client.post(f"/v1/documents/{document_id}/review")
         self.assertEqual(review.status_code, 200)
