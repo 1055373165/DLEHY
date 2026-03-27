@@ -359,6 +359,44 @@ class MemoryServiceTests(unittest.TestCase):
                 1,
             )
 
+    def test_translation_service_defaults_to_proposal_first_memory(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        target_packet_id = self._find_packet_with_text(packet_ids, "Context engineering")
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            service = TranslationService(TranslationRepository(session))
+            artifacts = service.execute_packet(target_packet_id)
+            session.commit()
+
+            proposal = session.scalars(
+                select(ChapterMemoryProposal).where(
+                    ChapterMemoryProposal.translation_run_id == artifacts.translation_run.id
+                )
+            ).first()
+            latest_snapshot = session.scalars(
+                select(MemorySnapshot)
+                .where(
+                    MemorySnapshot.document_id == document_id,
+                    MemorySnapshot.scope_type == MemoryScopeType.CHAPTER,
+                    MemorySnapshot.scope_id == chapter.id,
+                    MemorySnapshot.snapshot_type == SnapshotType.CHAPTER_TRANSLATION_MEMORY,
+                    MemorySnapshot.status == MemoryStatus.ACTIVE,
+                )
+                .order_by(MemorySnapshot.version.desc())
+            ).first()
+
+            self.assertFalse(service.default_auto_commit_memory)
+            self.assertIsNotNone(proposal)
+            self.assertIsNotNone(latest_snapshot)
+            assert proposal is not None
+            assert latest_snapshot is not None
+            self.assertEqual(proposal.status, MemoryProposalStatus.PROPOSED)
+            self.assertEqual(latest_snapshot.version, 2)
+
     def test_review_pass_commits_pending_chapter_memory_proposals_in_packet_order(self) -> None:
         document_id, packet_ids = self._bootstrap_to_db()
 

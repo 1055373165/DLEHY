@@ -260,7 +260,7 @@ class TranslationService:
         chapter_memory_repository: ChapterTranslationMemoryRepository | None = None,
         context_compiler: ChapterContextCompiler | None = None,
         memory_service: MemoryService | None = None,
-        default_auto_commit_memory: bool = True,
+        default_auto_commit_memory: bool = False,
     ):
         self.repository = repository
         self.worker = worker or EchoTranslationWorker()

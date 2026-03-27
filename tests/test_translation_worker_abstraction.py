@@ -59,7 +59,7 @@ from book_agent.services.context_compile import (
     ChapterContextCompiler,
     _compress_chapter_brief,
 )
-from book_agent.services.translation import TranslationService
+from book_agent.services.translation import TranslationService as _TranslationService
 from book_agent.workers.factory import build_translation_worker
 from book_agent.workers.contracts import (
     AlignmentSuggestion,
@@ -80,6 +80,11 @@ from book_agent.workers.translator import (
     TranslationTask,
     build_translation_prompt_request,
 )
+
+
+def TranslationService(*args, **kwargs):
+    kwargs.setdefault("default_auto_commit_memory", True)
+    return _TranslationService(*args, **kwargs)
 
 
 CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
