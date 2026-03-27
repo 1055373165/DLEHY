@@ -180,6 +180,16 @@ class ChapterRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     pause_reason: Mapped[str | None] = mapped_column(Text)
     last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    @property
+    def chapter_hold(self) -> dict[str, Any] | None:
+        hold = dict(self.conditions_json or {}).get("chapter_hold")
+        return hold if isinstance(hold, dict) else None
+
+    @property
+    def chapter_hold_active(self) -> bool:
+        hold = self.chapter_hold
+        return bool(hold and hold.get("active"))
+
 
 class PacketTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "packet_tasks"

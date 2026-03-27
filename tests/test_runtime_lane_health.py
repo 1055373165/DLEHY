@@ -7,9 +7,10 @@ from book_agent.domain.enums import (
     ChapterRunPhase,
     ChapterRunStatus,
     ChapterStatus,
-    DocumentRunStatus,
     DocumentRunType,
     DocumentStatus,
+    DocumentRunStatus,
+    JobScopeType,
     PacketTaskAction,
     PacketTaskStatus,
     PacketStatus,
@@ -296,3 +297,200 @@ class PacketControllerLaneHealthProjectionTests(unittest.TestCase):
                 RuntimeCheckpoint.checkpoint_key == "packet_controller.lane_health",
             ).one()
             self.assertEqual(checkpoint.checkpoint_json["lane_health"]["state"], "starved")
+
+    def test_packet_controller_escalates_repeated_packet_failures_to_chapter_hold(self) -> None:
+        now = datetime.now(timezone.utc)
+        bundle_revision_id = str(uuid4())
+        with self.session_factory() as session:
+            document = Document(
+                source_type=SourceType.EPUB,
+                file_fingerprint=f"packet-chapter-hold-{uuid4()}",
+                source_path="/tmp/packet-chapter-hold.epub",
+                title="Packet Chapter Hold",
+                author="Tester",
+                src_lang="en",
+                tgt_lang="zh",
+                status=DocumentStatus.ACTIVE,
+                parser_version=1,
+                segmentation_version=1,
+            )
+            session.add(document)
+            session.flush()
+
+            chapter = Chapter(
+                document_id=document.id,
+                ordinal=1,
+                title_src="Chapter 1",
+                status=ChapterStatus.PACKET_BUILT,
+                metadata_json={},
+            )
+            session.add(chapter)
+            session.flush()
+
+            packet_a = TranslationPacket(
+                chapter_id=chapter.id,
+                block_start_id=None,
+                block_end_id=None,
+                packet_type=PacketType.TRANSLATE,
+                book_profile_version=1,
+                chapter_brief_version=1,
+                termbase_version=1,
+                entity_snapshot_version=1,
+                style_snapshot_version=1,
+                packet_json={"packet_ordinal": 1},
+                risk_score=0.1,
+                status=PacketStatus.BUILT,
+            )
+            packet_b = TranslationPacket(
+                chapter_id=chapter.id,
+                block_start_id=None,
+                block_end_id=None,
+                packet_type=PacketType.TRANSLATE,
+                book_profile_version=1,
+                chapter_brief_version=1,
+                termbase_version=1,
+                entity_snapshot_version=1,
+                style_snapshot_version=1,
+                packet_json={"packet_ordinal": 2},
+                risk_score=0.1,
+                status=PacketStatus.BUILT,
+            )
+            session.add_all([packet_a, packet_b])
+            session.flush()
+
+            run = DocumentRun(
+                document_id=document.id,
+                run_type=DocumentRunType.TRANSLATE_FULL,
+                status=DocumentRunStatus.RUNNING,
+                requested_by="test",
+                priority=100,
+                status_detail_json={},
+            )
+            session.add(run)
+            session.flush()
+
+            chapter_run = ChapterRun(
+                run_id=run.id,
+                document_id=document.id,
+                chapter_id=chapter.id,
+                desired_phase=ChapterRunPhase.TRANSLATE,
+                observed_phase=ChapterRunPhase.TRANSLATE,
+                status=ChapterRunStatus.ACTIVE,
+                generation=1,
+                observed_generation=1,
+                conditions_json={},
+                status_detail_json={},
+            )
+            session.add(chapter_run)
+            session.flush()
+
+            packet_task_a = PacketTask(
+                chapter_run_id=chapter_run.id,
+                packet_id=packet_a.id,
+                packet_generation=1,
+                desired_action=PacketTaskAction.TRANSLATE,
+                status=PacketTaskStatus.RUNNING,
+                input_version_bundle_json={},
+                attempt_count=3,
+                conditions_json={},
+                status_detail_json={},
+                created_at=now - timedelta(minutes=30),
+                updated_at=now - timedelta(minutes=30),
+            )
+            packet_task_b = PacketTask(
+                chapter_run_id=chapter_run.id,
+                packet_id=packet_b.id,
+                packet_generation=1,
+                desired_action=PacketTaskAction.TRANSLATE,
+                status=PacketTaskStatus.RUNNING,
+                input_version_bundle_json={},
+                attempt_count=3,
+                conditions_json={},
+                status_detail_json={},
+                created_at=now - timedelta(minutes=29),
+                updated_at=now - timedelta(minutes=29),
+            )
+            session.add_all([packet_task_a, packet_task_b])
+            session.flush()
+
+            work_item_a = WorkItem(
+                run_id=run.id,
+                stage=WorkItemStage.TRANSLATE,
+                scope_type=WorkItemScopeType.PACKET,
+                scope_id=packet_a.id,
+                attempt=3,
+                priority=100,
+                status=WorkItemStatus.RUNNING,
+                lease_owner="worker-a",
+                lease_expires_at=now - timedelta(seconds=1),
+                last_heartbeat_at=now - timedelta(minutes=10),
+                started_at=now - timedelta(minutes=20),
+                updated_at=now - timedelta(minutes=5),
+                runtime_bundle_revision_id=bundle_revision_id,
+                input_version_bundle_json={},
+                output_artifact_refs_json={},
+                error_detail_json={},
+            )
+            work_item_b = WorkItem(
+                run_id=run.id,
+                stage=WorkItemStage.TRANSLATE,
+                scope_type=WorkItemScopeType.PACKET,
+                scope_id=packet_b.id,
+                attempt=3,
+                priority=100,
+                status=WorkItemStatus.RUNNING,
+                lease_owner="worker-b",
+                lease_expires_at=now - timedelta(seconds=1),
+                last_heartbeat_at=now - timedelta(minutes=10),
+                started_at=now - timedelta(minutes=19),
+                updated_at=now - timedelta(minutes=4),
+                runtime_bundle_revision_id=bundle_revision_id,
+                input_version_bundle_json={},
+                output_artifact_refs_json={},
+                error_detail_json={},
+            )
+            session.add_all([work_item_a, work_item_b])
+            session.commit()
+
+            controller = PacketController(session=session)
+            projected = controller.project_lane_health(run_id=run.id)
+            session.commit()
+
+            self.assertEqual(projected, 2)
+
+            persisted_chapter_run = session.get(ChapterRun, chapter_run.id)
+            persisted_tasks = session.query(PacketTask).filter(PacketTask.chapter_run_id == chapter_run.id).all()
+            chapter_hold = persisted_chapter_run.conditions_json["chapter_hold"]
+            self.assertEqual(persisted_chapter_run.status, ChapterRunStatus.PAUSED)
+            self.assertEqual(persisted_chapter_run.pause_reason, "repair_exhausted")
+            self.assertEqual(chapter_hold["next_action"], "manual_review")
+            self.assertEqual(chapter_hold["evidence_json"]["fingerprint_occurrences"], 2)
+            self.assertEqual(chapter_hold["evidence_json"]["retry_cap"], 3)
+            self.assertEqual(chapter_hold["evidence_json"]["next_boundary"], "chapter")
+            self.assertCountEqual(
+                chapter_hold["evidence_json"]["affected_packet_ids"],
+                [packet_a.id, packet_b.id],
+            )
+            self.assertEqual(
+                persisted_chapter_run.status_detail_json["runtime_v2"]["chapter_hold"]["scope_boundary"],
+                "chapter",
+            )
+            self.assertTrue(
+                all(
+                    task.status_detail_json["runtime_v2"]["recovery_decision"]["recommended_action"] == "chapter_hold"
+                    for task in persisted_tasks
+                )
+            )
+
+            chapter_checkpoint = session.query(RuntimeCheckpoint).filter(
+                RuntimeCheckpoint.run_id == run.id,
+                RuntimeCheckpoint.scope_type == JobScopeType.CHAPTER,
+                RuntimeCheckpoint.scope_id == chapter.id,
+                RuntimeCheckpoint.checkpoint_key == "chapter_controller.chapter_hold",
+            ).one()
+            self.assertEqual(chapter_checkpoint.checkpoint_json["hold_reason"], "repair_exhausted")
+            self.assertEqual(chapter_checkpoint.checkpoint_json["scope_boundary"], "chapter")
+            self.assertCountEqual(
+                chapter_checkpoint.checkpoint_json["evidence_json"]["affected_packet_ids"],
+                [packet_a.id, packet_b.id],
+            )

@@ -487,6 +487,33 @@ class RuntimeResourcesRepository:
             raise ValueError(f"RuntimePatchProposal not found: {proposal_id}")
         return proposal
 
+    def record_chapter_hold(
+        self,
+        *,
+        chapter_run_id: str,
+        hold_reason: str,
+        evidence_json: dict[str, Any] | None = None,
+        next_action: str | None = None,
+    ) -> ChapterRun:
+        normalized_reason = hold_reason.strip()
+        if not normalized_reason:
+            raise ValueError("hold_reason must not be empty")
+
+        chapter_run = self.get_chapter_run(chapter_run_id)
+        now = _utcnow()
+        conditions = dict(chapter_run.conditions_json or {})
+        conditions["chapter_hold"] = {
+            "active": True,
+            "hold_reason": normalized_reason,
+            "evidence_json": dict(evidence_json or {}),
+            "next_action": next_action,
+            "recorded_at": now.isoformat(),
+        }
+        return self.update_chapter_run(
+            chapter_run_id,
+            conditions_json=conditions,
+        )
+
     def list_retryable_work_items_for_scope(
         self,
         *,
