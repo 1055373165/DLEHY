@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Iterable
 from typing import Any
 
 from sqlalchemy import select
@@ -71,6 +72,27 @@ class ChapterTranslationMemoryRepository:
         return self.session.scalars(
             select(ChapterMemoryProposal).where(ChapterMemoryProposal.translation_run_id == translation_run_id)
         ).first()
+
+    def list_proposals_for_translation_runs(
+        self,
+        *,
+        translation_run_ids: Iterable[str],
+        status: MemoryProposalStatus = MemoryProposalStatus.PROPOSED,
+    ) -> list[ChapterMemoryProposal]:
+        run_ids = tuple(dict.fromkeys(str(run_id) for run_id in translation_run_ids if run_id))
+        if not run_ids:
+            return []
+        return self.session.scalars(
+            select(ChapterMemoryProposal)
+            .where(
+                ChapterMemoryProposal.translation_run_id.in_(run_ids),
+                ChapterMemoryProposal.status == status,
+            )
+            .order_by(
+                ChapterMemoryProposal.created_at.asc(),
+                ChapterMemoryProposal.translation_run_id.asc(),
+            )
+        ).all()
 
     def create_or_replace_proposal(
         self,

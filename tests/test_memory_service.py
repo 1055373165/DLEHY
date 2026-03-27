@@ -11,17 +11,19 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from book_agent.domain.enums import MemoryProposalStatus, MemoryScopeType, MemoryStatus, SnapshotType
+from book_agent.domain.enums import ChapterStatus, MemoryProposalStatus, MemoryScopeType, MemoryStatus, SnapshotType
 from book_agent.domain.models import Chapter, ChapterMemoryProposal, MemorySnapshot
 from book_agent.domain.models.translation import TranslationRun
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.infra.repositories.bootstrap import BootstrapRepository
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
+from book_agent.infra.repositories.review import ReviewRepository
 from book_agent.infra.repositories.translation import TranslationRepository
 from book_agent.orchestrator.bootstrap import BootstrapOrchestrator
 from book_agent.services.context_compile import ChapterContextCompiler
 from book_agent.services.memory_service import MemoryService
+from book_agent.services.review import ReviewService
 from book_agent.services.translation import TranslationService
 from book_agent.workers.contracts import (
     AlignmentSuggestion,
@@ -354,6 +356,95 @@ class MemoryServiceTests(unittest.TestCase):
             self.assertGreaterEqual(
                 len(latest_snapshot.content_json["recent_accepted_translations"]),
                 1,
+            )
+
+    def test_review_pass_commits_pending_chapter_memory_proposals_in_packet_order(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+        with self.session_factory() as session:
+            repository = TranslationRepository(session)
+            memory_service = MemoryService(
+                chapter_memory_repository=ChapterTranslationMemoryRepository(session),
+                context_compiler=ChapterContextCompiler(),
+            )
+            service = TranslationService(
+                repository,
+                memory_service=memory_service,
+            )
+            for packet_id in packet_ids:
+                service.execute_packet(packet_id, auto_commit_memory=False)
+            session.commit()
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+            latest_snapshot = session.scalars(
+                select(MemorySnapshot)
+                .where(
+                    MemorySnapshot.document_id == document_id,
+                    MemorySnapshot.scope_type == MemoryScopeType.CHAPTER,
+                    MemorySnapshot.scope_id == chapter.id,
+                    MemorySnapshot.snapshot_type == SnapshotType.CHAPTER_TRANSLATION_MEMORY,
+                    MemorySnapshot.status == MemoryStatus.ACTIVE,
+                )
+                .order_by(MemorySnapshot.version.desc())
+            ).first()
+
+            self.assertEqual(len(proposals), 2)
+            self.assertTrue(all(proposal.status == MemoryProposalStatus.PROPOSED for proposal in proposals))
+            self.assertIsNotNone(latest_snapshot)
+            assert latest_snapshot is not None
+            self.assertEqual(latest_snapshot.version, 2)
+
+            review_artifacts = ReviewService(ReviewRepository(session)).review_chapter(chapter.id)
+            session.commit()
+
+            self.assertEqual(review_artifacts.summary.blocking_issue_count, 0)
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+            latest_snapshot = session.scalars(
+                select(MemorySnapshot)
+                .where(
+                    MemorySnapshot.document_id == document_id,
+                    MemorySnapshot.scope_type == MemoryScopeType.CHAPTER,
+                    MemorySnapshot.scope_id == chapter.id,
+                    MemorySnapshot.snapshot_type == SnapshotType.CHAPTER_TRANSLATION_MEMORY,
+                    MemorySnapshot.status == MemoryStatus.ACTIVE,
+                )
+                .order_by(MemorySnapshot.version.desc())
+            ).first()
+
+            self.assertEqual(chapter.status, ChapterStatus.QA_CHECKED)
+            self.assertTrue(all(proposal.status == MemoryProposalStatus.COMMITTED for proposal in proposals))
+            self.assertIsNotNone(latest_snapshot)
+            assert latest_snapshot is not None
+            self.assertEqual(latest_snapshot.version, 4)
+            self.assertEqual(
+                latest_snapshot.content_json["recent_accepted_translations"][0]["packet_id"],
+                "prev-packet",
+            )
+            self.assertEqual(
+                [item["packet_id"] for item in latest_snapshot.content_json["recent_accepted_translations"][-2:]],
+                packet_ids,
+            )
+            self.assertEqual(
+                latest_snapshot.content_json["last_translation_run_id"],
+                proposals[-1].translation_run_id,
             )
 
 

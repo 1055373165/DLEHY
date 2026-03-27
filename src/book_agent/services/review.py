@@ -17,6 +17,7 @@ from book_agent.domain.enums import (
     JobScopeType,
     LockLevel,
     RootCauseLayer,
+    RunStatus,
     SourceType,
     TargetSegmentStatus,
     SentenceStatus,
@@ -24,9 +25,12 @@ from book_agent.domain.enums import (
 )
 from book_agent.domain.models.review import ChapterQualitySummary as ChapterQualitySummaryRecord, IssueAction, ReviewIssue
 from book_agent.domain.structure.artifact_grouping import normalize_artifact_role, resolve_artifact_group_context_ids
+from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
 from book_agent.infra.repositories.review import ChapterReviewBundle, ReviewRepository
 from book_agent.orchestrator.rerun import RerunPlan, build_rerun_plan
 from book_agent.orchestrator.rule_engine import IssueRoutingContext, resolve_action
+from book_agent.services.context_compile import ChapterContextCompiler
+from book_agent.services.memory_service import MemoryService
 from book_agent.services.style_drift import STYLE_DRIFT_RULES
 from book_agent.services.term_normalization import normalize_term_rendering
 
@@ -111,8 +115,12 @@ class ReviewAlignmentState:
 
 
 class ReviewService:
-    def __init__(self, repository: ReviewRepository):
+    def __init__(self, repository: ReviewRepository, memory_service: MemoryService | None = None):
         self.repository = repository
+        self.memory_service = memory_service or MemoryService(
+            chapter_memory_repository=ChapterTranslationMemoryRepository(repository.session),
+            context_compiler=ChapterContextCompiler(),
+        )
 
     def review_chapter(self, chapter_id: str) -> ReviewArtifacts:
         bundle = self.repository.load_chapter_bundle(chapter_id)
@@ -129,6 +137,7 @@ class ReviewService:
             bundle.chapter.status = ChapterStatus.REVIEW_REQUIRED
         else:
             bundle.chapter.status = ChapterStatus.QA_CHECKED
+            self._commit_review_approved_memory(bundle)
         artifacts.resolved_issue_ids.extend(issue.id for issue in resolved)
         persisted_summary = self._build_persisted_summary_record(bundle, artifacts, len(resolved))
         self.repository.save_review_artifacts(
@@ -139,6 +148,26 @@ class ReviewService:
         )
         self.repository.session.flush()
         return artifacts
+
+    def _commit_review_approved_memory(self, bundle: ChapterReviewBundle) -> None:
+        latest_run_ids_by_packet: dict[str, str] = {}
+        latest_attempt_by_packet: dict[str, int] = {}
+        for translation_run in bundle.translation_runs:
+            if translation_run.status != RunStatus.SUCCEEDED:
+                continue
+            current_attempt = latest_attempt_by_packet.get(translation_run.packet_id, -1)
+            if translation_run.attempt >= current_attempt:
+                latest_attempt_by_packet[translation_run.packet_id] = translation_run.attempt
+                latest_run_ids_by_packet[translation_run.packet_id] = translation_run.id
+
+        if not latest_run_ids_by_packet:
+            return
+
+        self.memory_service.commit_review_approved_chapter_memory(
+            document_id=bundle.chapter.document_id,
+            chapter_id=bundle.chapter.id,
+            approved_translation_run_ids=latest_run_ids_by_packet.values(),
+        )
 
     def _should_suppress_fragmentary_pdf_omission(self, sentence, block) -> bool:
         if block is None:

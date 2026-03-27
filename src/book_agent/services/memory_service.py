@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from typing import Iterable
 
 from book_agent.domain.models import ChapterMemoryProposal, MemorySnapshot
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
@@ -13,6 +14,13 @@ from book_agent.workers.contracts import CompiledTranslationContext, ContextPack
 class CompiledContextLoadResult:
     context: CompiledTranslationContext
     chapter_memory_snapshot: MemorySnapshot | None
+
+
+def _coerce_nonnegative_int(value: object) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass(slots=True)
@@ -117,3 +125,141 @@ class MemoryService:
             committed_snapshot=committed_snapshot,
         )
         return committed_snapshot
+
+    def commit_review_approved_chapter_memory(
+        self,
+        *,
+        document_id: str,
+        chapter_id: str,
+        approved_translation_run_ids: Iterable[str],
+    ) -> list[MemorySnapshot]:
+        proposals = self.chapter_memory_repository.list_proposals_for_translation_runs(
+            translation_run_ids=approved_translation_run_ids
+        )
+        if not proposals:
+            return []
+
+        current_snapshot = self.load_latest_chapter_memory(document_id=document_id, chapter_id=chapter_id)
+        committed_snapshots: list[MemorySnapshot] = []
+        for proposal in proposals:
+            merged_content_json = self._merge_review_approved_proposal(
+                base_content_json=current_snapshot.content_json if current_snapshot is not None else {},
+                proposal=proposal,
+            )
+            current_snapshot = self.chapter_memory_repository.supersede_and_create_next(
+                current_snapshot=current_snapshot,
+                document_id=document_id,
+                chapter_id=chapter_id,
+                content_json=merged_content_json,
+            )
+            self.chapter_memory_repository.mark_proposal_committed(
+                proposal,
+                committed_snapshot=current_snapshot,
+            )
+            committed_snapshots.append(current_snapshot)
+        return committed_snapshots
+
+    def _merge_review_approved_proposal(
+        self,
+        *,
+        base_content_json: dict[str, Any],
+        proposal: ChapterMemoryProposal,
+    ) -> dict[str, Any]:
+        proposal_content = dict(proposal.proposed_content_json or {})
+        base_content = dict(base_content_json or {})
+
+        base_recent = base_content.get("recent_accepted_translations", [])
+        if not isinstance(base_recent, list):
+            base_recent = []
+        proposal_recent = proposal_content.get("recent_accepted_translations", [])
+        if not isinstance(proposal_recent, list):
+            proposal_recent = []
+
+        proposal_entry = next(
+            (
+                dict(item)
+                for item in proposal_recent
+                if isinstance(item, dict) and item.get("packet_id") == proposal.packet_id
+            ),
+            None,
+        )
+        merged_recent = [
+            dict(item)
+            for item in base_recent
+            if isinstance(item, dict) and item.get("packet_id") != proposal.packet_id
+        ]
+        if proposal_entry is not None:
+            merged_recent.append(proposal_entry)
+        merged_recent = merged_recent[-4:]
+
+        base_concepts = base_content.get("active_concepts", [])
+        if not isinstance(base_concepts, list):
+            base_concepts = []
+        proposal_concepts = proposal_content.get("active_concepts", [])
+        if not isinstance(proposal_concepts, list):
+            proposal_concepts = []
+        merged_concepts = self._merge_active_concept_payloads(
+            existing_concepts=base_concepts,
+            proposal_concepts=proposal_concepts,
+        )
+
+        merged_brief_version = _coerce_nonnegative_int(base_content.get("chapter_brief_version"))
+        proposal_brief_version = _coerce_nonnegative_int(proposal_content.get("chapter_brief_version"))
+        chapter_brief = base_content.get("chapter_brief")
+        heading_path = base_content.get("heading_path")
+        if proposal_content.get("chapter_brief") and proposal_brief_version >= merged_brief_version:
+            chapter_brief = proposal_content.get("chapter_brief")
+            heading_path = proposal_content.get("heading_path")
+            merged_brief_version = proposal_brief_version
+
+        return {
+            "schema_version": 1,
+            "chapter_id": proposal.chapter_id,
+            "chapter_title": base_content.get("chapter_title") or proposal_content.get("chapter_title"),
+            "heading_path": heading_path,
+            "chapter_brief": chapter_brief,
+            "chapter_brief_version": merged_brief_version or None,
+            "active_concepts": merged_concepts,
+            "recent_accepted_translations": merged_recent,
+            "last_packet_id": proposal.packet_id,
+            "last_translation_run_id": proposal.translation_run_id,
+        }
+
+    def _merge_active_concept_payloads(
+        self,
+        *,
+        existing_concepts: list[dict[str, Any]],
+        proposal_concepts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+
+        def _upsert(raw_item: Any) -> None:
+            if not isinstance(raw_item, dict):
+                return
+            source_term = str(raw_item.get("source_term") or "").strip()
+            if not source_term:
+                return
+            key = source_term.lower()
+            normalized_item = dict(raw_item)
+            if key not in merged:
+                merged[key] = normalized_item
+                order.append(key)
+                return
+            current = merged[key]
+            for field, value in normalized_item.items():
+                if field == "times_seen":
+                    current[field] = max(
+                        _coerce_nonnegative_int(current.get(field)),
+                        _coerce_nonnegative_int(value),
+                    )
+                    continue
+                if value not in (None, "", [], {}):
+                    current[field] = value
+            current.setdefault("source_term", source_term)
+
+        for item in existing_concepts:
+            _upsert(item)
+        for item in proposal_concepts:
+            _upsert(item)
+        return [merged[key] for key in order]
