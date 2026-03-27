@@ -292,6 +292,31 @@ class RunExecutionServiceTests(unittest.TestCase):
         assert reclaimed_claim is not None
         self.assertEqual(reclaimed_claim.attempt, 2)
 
+    def test_document_run_executor_controller_runner_reconcile_is_best_effort_and_throttled(self) -> None:
+        run_id = self._create_running_run()
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root="/tmp",
+            translation_worker=None,
+            controller_reconcile_interval_seconds=999.0,
+        )
+
+        calls: list[str] = []
+
+        class _ExplodingRunner:
+            def reconcile_run(self, *, run_id: str) -> None:
+                calls.append(run_id)
+                raise RuntimeError("controller runner exploded")
+
+        executor._controller_runner = _ExplodingRunner()  # type: ignore[assignment]
+
+        executor._maybe_reconcile_controllers(run_id)
+        self.assertEqual(calls, [run_id])
+
+        # Second call should be throttled even if the first attempt errored.
+        executor._maybe_reconcile_controllers(run_id)
+        self.assertEqual(calls, [run_id])
+
     def test_claim_translate_work_items_prefers_front_packet_even_when_work_item_order_is_reversed(self) -> None:
         document_id, packet_ids_by_chapter = self._create_document_with_chapter_packets([[1, 2]])
         run_id = self._create_running_run_for_document(document_id)

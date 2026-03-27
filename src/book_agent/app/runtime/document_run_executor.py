@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from book_agent.app.runtime.controller_runner import ControllerRunner
 from book_agent.core.ids import stable_id
 from book_agent.domain.enums import (
     DocumentRunStatus,
@@ -111,6 +112,8 @@ class DocumentRunExecutor:
         export_root: str | Path,
         translation_worker: TranslationWorker | None,
         poll_interval_seconds: float = 1.0,
+        controller_reconcile_interval_seconds: float = 10.0,
+        enable_controller_runner: bool = True,
         lease_seconds: int = 120,
         review_lease_seconds: int = 1800,
         heartbeat_interval_seconds: int = 15,
@@ -122,6 +125,9 @@ class DocumentRunExecutor:
         self.export_root = str(Path(export_root).resolve())
         self.translation_worker = translation_worker
         self.poll_interval_seconds = poll_interval_seconds
+        self.controller_reconcile_interval_seconds = max(0.0, float(controller_reconcile_interval_seconds))
+        self._controller_runner = ControllerRunner(session_factory) if enable_controller_runner else None
+        self._controller_last_reconcile_at_by_run: dict[str, float] = {}
         self.lease_seconds = lease_seconds
         self.review_lease_seconds = max(self.lease_seconds, int(review_lease_seconds))
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
@@ -134,6 +140,33 @@ class DocumentRunExecutor:
         self._active_run_threads: dict[str, threading.Thread] = {}
         self._active_work_threads: dict[str, dict[str, threading.Thread]] = {}
         self._lock = threading.Lock()
+
+    def _maybe_reconcile_controllers(self, run_id: str) -> None:
+        """
+        Phase A: best-effort controller reconcile integration.
+
+        Contract (for now):
+        - Mirror-only: controllers may only create/update Runtime V2 resources/checkpoints.
+        - Must not block or fail the existing V1 run loop.
+        """
+
+        runner = self._controller_runner
+        if runner is None:
+            return
+        now = time.monotonic()
+        last = self._controller_last_reconcile_at_by_run.get(run_id)
+        if last is not None and (now - last) < self.controller_reconcile_interval_seconds:
+            return
+        self._controller_last_reconcile_at_by_run[run_id] = now
+
+        try:
+            runner.reconcile_run(run_id=run_id)
+        except OperationalError:
+            # Common in sqlite + multi-threaded execution; treat as best-effort scaffold.
+            return
+        except Exception:
+            # Keep Phase A wiring strictly non-invasive (no behavior change to V1 runner).
+            return
 
     def _is_sqlite_session(self, session: Session) -> bool:
         bind = session.get_bind()
@@ -294,6 +327,7 @@ class DocumentRunExecutor:
                 return
 
             try:
+                self._maybe_reconcile_controllers(run_id)
                 self._reclaim_expired_leases(run_id)
                 if self._process_translate_stage(run_id):
                     continue
