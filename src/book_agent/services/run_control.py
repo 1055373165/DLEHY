@@ -163,6 +163,17 @@ class RunControlService:
         latest_heartbeat_at = self.repository.latest_worker_heartbeat_at(run_id)
         latest_event_at = self.repository.latest_run_event_at(run_id)
         event_count = self.repository.list_run_events(run_id, limit=0).total_count
+        status_detail_json = self._with_default_status_detail(run.status_detail_json or {})
+        runtime_v2 = dict(status_detail_json.get("runtime_v2") or {})
+        runtime_v2.update(
+            {
+                "runtime_bundle_revision_id": run.runtime_bundle_revision_id,
+                "chapter_run_count": self.repository.count_chapter_runs_for_run(run_id),
+                "packet_task_count": self.repository.count_packet_tasks_for_run(run_id),
+                "runtime_checkpoint_count": self.repository.count_runtime_checkpoints_for_run(run_id),
+            }
+        )
+        status_detail_json["runtime_v2"] = runtime_v2
         return DocumentRunSummary(
             run_id=run.id,
             document_id=run.document_id,
@@ -174,7 +185,7 @@ class RunControlService:
             priority=run.priority,
             resume_from_run_id=run.resume_from_run_id,
             stop_reason=run.stop_reason,
-            status_detail_json=dict(run.status_detail_json or {}),
+            status_detail_json=status_detail_json,
             created_at=self._isoformat(run.created_at),
             updated_at=self._isoformat(run.updated_at),
             started_at=self._isoformat(run.started_at),

@@ -1,11 +1,13 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, Text, Uuid, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from book_agent.domain.enums import (
     ActorType,
+    ChapterRunPhase,
+    ChapterRunStatus,
     DocumentRunStatus,
     DocumentRunType,
     InvalidatedByType,
@@ -13,6 +15,8 @@ from book_agent.domain.enums import (
     JobScopeType,
     JobStatus,
     JobType,
+    PacketTaskAction,
+    PacketTaskStatus,
     WorkItemScopeType,
     WorkItemStage,
     WorkItemStatus,
@@ -114,6 +118,7 @@ class DocumentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         enum_value_type(DocumentRunStatus, name="document_run_status"),
         nullable=False,
     )
+    runtime_bundle_revision_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
     backend: Mapped[str | None] = mapped_column(Text)
     model_name: Mapped[str | None] = mapped_column(Text)
     requested_by: Mapped[str | None] = mapped_column(Text)
@@ -126,6 +131,125 @@ class DocumentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status_detail_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChapterRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "chapter_runs"
+    __table_args__ = (UniqueConstraint("run_id", "chapter_id", name="uq_chapter_runs_run_chapter"),)
+
+    run_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("document_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    chapter_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    desired_phase: Mapped[ChapterRunPhase] = mapped_column(
+        enum_value_type(ChapterRunPhase, name="chapter_run_phase"),
+        nullable=False,
+        default=ChapterRunPhase.PACKETIZE,
+    )
+    observed_phase: Mapped[ChapterRunPhase] = mapped_column(
+        enum_value_type(ChapterRunPhase, name="chapter_run_phase"),
+        nullable=False,
+        default=ChapterRunPhase.PACKETIZE,
+    )
+    status: Mapped[ChapterRunStatus] = mapped_column(
+        enum_value_type(ChapterRunStatus, name="chapter_run_status"),
+        nullable=False,
+        default=ChapterRunStatus.ACTIVE,
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    observed_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    conditions_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status_detail_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    pause_reason: Mapped[str | None] = mapped_column(Text)
+    last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PacketTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "packet_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "chapter_run_id",
+            "packet_id",
+            "packet_generation",
+            name="uq_packet_tasks_chapter_packet_generation",
+        ),
+    )
+
+    chapter_run_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("chapter_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    packet_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("translation_packets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    packet_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    desired_action: Mapped[PacketTaskAction] = mapped_column(
+        enum_value_type(PacketTaskAction, name="packet_task_action"),
+        nullable=False,
+        default=PacketTaskAction.TRANSLATE,
+    )
+    status: Mapped[PacketTaskStatus] = mapped_column(
+        enum_value_type(PacketTaskStatus, name="packet_task_status"),
+        nullable=False,
+        default=PacketTaskStatus.PENDING,
+    )
+    input_version_bundle_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    context_snapshot_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    runtime_bundle_revision_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_translation_run_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("translation_runs.id", ondelete="SET NULL"),
+    )
+    last_work_item_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("work_items.id", ondelete="SET NULL"),
+    )
+    last_error_class: Mapped[str | None] = mapped_column(Text)
+    conditions_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status_detail_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RuntimeCheckpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "runtime_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "scope_type",
+            "scope_id",
+            "checkpoint_key",
+            name="uq_runtime_checkpoints_scope_key",
+        ),
+    )
+
+    run_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("document_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scope_type: Mapped[JobScopeType] = mapped_column(
+        enum_value_type(JobScopeType, name="runtime_checkpoint_scope_type"),
+        nullable=False,
+    )
+    scope_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    checkpoint_key: Mapped[str] = mapped_column(Text, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    checkpoint_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
 
 class WorkItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -152,6 +276,7 @@ class WorkItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=WorkItemStatus.PENDING,
     )
+    runtime_bundle_revision_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
     lease_owner: Mapped[str | None] = mapped_column(Text)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -207,6 +332,7 @@ class RunBudget(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     max_parallel_workers: Mapped[int | None] = mapped_column(Integer)
     max_parallel_requests_per_provider: Mapped[int | None] = mapped_column(Integer)
     max_auto_followup_attempts: Mapped[int | None] = mapped_column(Integer)
+    runtime_bundle_revision_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
 
 
 class RunAuditEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

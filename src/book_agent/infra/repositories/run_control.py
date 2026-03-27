@@ -6,9 +6,19 @@ from datetime import datetime, timezone
 from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 
-from book_agent.domain.enums import WorkItemScopeType, WorkItemStage, WorkItemStatus, WorkerLeaseStatus
-from book_agent.domain.models import Document
-from book_agent.domain.models.ops import DocumentRun, RunAuditEvent, RunBudget, WorkItem, WorkerLease
+from book_agent.domain.enums import PacketStatus, WorkItemScopeType, WorkItemStage, WorkItemStatus, WorkerLeaseStatus
+from book_agent.domain.models import Chapter, Document
+from book_agent.domain.models.ops import (
+    ChapterRun,
+    DocumentRun,
+    PacketTask,
+    RunAuditEvent,
+    RunBudget,
+    RuntimeCheckpoint,
+    WorkItem,
+    WorkerLease,
+)
+from book_agent.domain.models.translation import TranslationPacket
 
 
 @dataclass(slots=True)
@@ -76,6 +86,11 @@ class RunControlRepository:
             self.session.add(audit_event)
         self.session.flush()
         return run
+
+    def record_run_event(self, audit_event: RunAuditEvent) -> RunAuditEvent:
+        self.session.add(audit_event)
+        self.session.flush()
+        return audit_event
 
     def list_run_events(
         self,
@@ -205,6 +220,36 @@ class RunControlRepository:
             )
         ) or 0
 
+    def count_built_packets_for_document(self, document_id: str) -> int:
+        return self.session.scalar(
+            select(func.count(TranslationPacket.id))
+            .join(Chapter, Chapter.id == TranslationPacket.chapter_id)
+            .where(
+                Chapter.document_id == document_id,
+                TranslationPacket.status == PacketStatus.BUILT,
+            )
+        ) or 0
+
+    def count_chapter_runs_for_run(self, run_id: str) -> int:
+        return self.session.scalar(select(func.count(ChapterRun.id)).where(ChapterRun.run_id == run_id)) or 0
+
+    def count_packet_tasks_for_run(self, run_id: str) -> int:
+        return (
+            self.session.scalar(
+                select(func.count(PacketTask.id))
+                .join(ChapterRun, ChapterRun.id == PacketTask.chapter_run_id)
+                .where(ChapterRun.run_id == run_id)
+            )
+            or 0
+        )
+
+    def count_runtime_checkpoints_for_run(self, run_id: str) -> int:
+        return (
+            self.session.scalar(
+                select(func.count(RuntimeCheckpoint.id)).where(RuntimeCheckpoint.run_id == run_id)
+            )
+            or 0
+        )
     def list_claimable_work_item_ids(
         self,
         run_id: str,

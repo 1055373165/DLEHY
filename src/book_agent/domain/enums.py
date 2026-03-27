@@ -345,3 +345,32 @@ class InvalidatedObjectType(StrEnum):
     ALIGNMENT_EDGE = "alignment_edge"
     MEMORY_SNAPSHOT = "memory_snapshot"
     EXPORT = "export"
+
+
+class ChapterRunPhase(StrEnum):
+    PACKETIZE = "packetize"
+    TRANSLATE = "translate"
+    REVIEW = "review"
+    EXPORT = "export"
+    COMPLETE = "complete"
+
+
+class ChapterRunStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class PacketTaskAction(StrEnum):
+    TRANSLATE = "translate"
+    RETRANSLATE = "retranslate"
+
+
+class PacketTaskStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
