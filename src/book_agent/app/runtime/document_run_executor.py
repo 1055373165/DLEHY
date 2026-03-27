@@ -139,6 +139,7 @@ class DocumentRunExecutor:
         self._supervisor_thread: threading.Thread | None = None
         self._active_run_threads: dict[str, threading.Thread] = {}
         self._active_work_threads: dict[str, dict[str, threading.Thread]] = {}
+        self._controller_runner = ControllerRunner(session_factory)
         self._lock = threading.Lock()
 
     def _maybe_reconcile_controllers(self, run_id: str) -> None:
@@ -349,6 +350,13 @@ class DocumentRunExecutor:
 
             self._wake_event.wait(timeout=self.poll_interval_seconds)
             self._wake_event.clear()
+
+    def _reconcile_runtime_resources(self, run_id: str) -> None:
+        try:
+            self._controller_runner.reconcile_run(run_id=run_id)
+        except Exception:
+            # Phase A is mirror-only; control-plane scaffolding must not interrupt the V1 run loop.
+            return
 
     def _reclaim_expired_leases(self, run_id: str) -> bool:
         with session_scope(self.session_factory) as session:

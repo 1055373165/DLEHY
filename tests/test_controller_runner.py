@@ -1,0 +1,141 @@
+import unittest
+from uuid import uuid4
+
+from book_agent.app.runtime.controller_runner import ControllerRunner
+from book_agent.domain.enums import (
+    ChapterStatus,
+    DocumentRunStatus,
+    DocumentRunType,
+    DocumentStatus,
+    JobScopeType,
+    PacketStatus,
+    PacketType,
+    SourceType,
+    WorkItemScopeType,
+    WorkItemStage,
+    WorkItemStatus,
+)
+from book_agent.domain.models import Chapter, Document
+from book_agent.domain.models.ops import DocumentRun
+from book_agent.domain.models.translation import TranslationPacket
+from book_agent.infra.db.base import Base
+from book_agent.infra.db.session import build_engine, build_session_factory
+from book_agent.infra.repositories.runtime_resources import RuntimeResourcesRepository
+from book_agent.services.run_execution import RunExecutionService
+from book_agent.infra.repositories.run_control import RunControlRepository
+
+
+class ControllerRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = build_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(self.engine)
+        self.session_factory = build_session_factory(engine=self.engine)
+
+    def _seed_document_run(self) -> tuple[str, str, str]:
+        with self.session_factory() as session:
+            document = Document(
+                source_type=SourceType.EPUB,
+                file_fingerprint=f"controller-runner-{uuid4()}",
+                source_path="/tmp/controller-runner.epub",
+                title="Controller Runner",
+                author="Tester",
+                src_lang="en",
+                tgt_lang="zh",
+                status=DocumentStatus.ACTIVE,
+                parser_version=1,
+                segmentation_version=1,
+            )
+            session.add(document)
+            session.flush()
+
+            chapter = Chapter(
+                document_id=document.id,
+                ordinal=1,
+                title_src="Chapter 1",
+                status=ChapterStatus.PACKET_BUILT,
+                metadata_json={},
+            )
+            session.add(chapter)
+            session.flush()
+
+            packet = TranslationPacket(
+                chapter_id=chapter.id,
+                block_start_id=None,
+                block_end_id=None,
+                packet_type=PacketType.TRANSLATE,
+                book_profile_version=1,
+                chapter_brief_version=1,
+                termbase_version=1,
+                entity_snapshot_version=1,
+                style_snapshot_version=1,
+                packet_json={"packet_ordinal": 1, "input_version_bundle": {"chapter_id": chapter.id}},
+                risk_score=0.1,
+                status=PacketStatus.BUILT,
+            )
+            session.add(packet)
+            session.flush()
+
+            run = DocumentRun(
+                document_id=document.id,
+                run_type=DocumentRunType.TRANSLATE_FULL,
+                status=DocumentRunStatus.RUNNING,
+                requested_by="test",
+                priority=100,
+                status_detail_json={},
+            )
+            session.add(run)
+            session.commit()
+            return run.id, chapter.id, packet.id
+
+    def test_reconcile_run_creates_runtime_resources_and_checkpoint(self) -> None:
+        run_id, chapter_id, packet_id = self._seed_document_run()
+
+        runner = ControllerRunner(self.session_factory)
+        stats = runner.reconcile_run(run_id=run_id)
+        self.assertEqual(stats.created_chapter_runs, 1)
+        self.assertEqual(stats.created_packet_tasks, 1)
+        self.assertEqual(stats.mirrored_packet_tasks, 0)
+
+        with self.session_factory() as session:
+            repo = RuntimeResourcesRepository(session)
+            chapter_runs = repo.list_chapter_runs_for_run(run_id=run_id)
+            self.assertEqual(len(chapter_runs), 1)
+            packet_tasks = repo.list_packet_tasks_for_chapter_run(chapter_run_id=chapter_runs[0].id)
+            self.assertEqual(len(packet_tasks), 1)
+            self.assertEqual(packet_tasks[0].packet_id, packet_id)
+            checkpoint = repo.get_checkpoint(
+                run_id=run_id,
+                scope_type=JobScopeType.DOCUMENT,
+                scope_id=chapter_runs[0].document_id,
+                checkpoint_key="controller_runner.phase_a",
+            )
+            self.assertIsNotNone(checkpoint)
+
+    def test_reconcile_run_mirrors_existing_translate_work_item_binding(self) -> None:
+        run_id, _chapter_id, packet_id = self._seed_document_run()
+        runner = ControllerRunner(self.session_factory)
+        runner.reconcile_run(run_id=run_id)
+
+        with self.session_factory() as session:
+            execution = RunExecutionService(RunControlRepository(session))
+            execution.seed_work_items(
+                run_id=run_id,
+                stage=WorkItemStage.TRANSLATE,
+                scope_type=WorkItemScopeType.PACKET,
+                scope_ids=[packet_id],
+                priority=100,
+                input_version_bundle_by_scope_id={packet_id: {"packet_id": packet_id}},
+            )
+            session.commit()
+
+        stats = runner.reconcile_run(run_id=run_id)
+        self.assertEqual(stats.created_chapter_runs, 0)
+        self.assertEqual(stats.created_packet_tasks, 0)
+        self.assertEqual(stats.mirrored_packet_tasks, 1)
+
+        with self.session_factory() as session:
+            repo = RuntimeResourcesRepository(session)
+            chapter_run = repo.list_chapter_runs_for_run(run_id=run_id)[0]
+            packet_task = repo.list_packet_tasks_for_chapter_run(chapter_run_id=chapter_run.id)[0]
+            self.assertIsNotNone(packet_task.last_work_item_id)
+            self.assertEqual(packet_task.attempt_count, 1)
