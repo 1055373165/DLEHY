@@ -20,10 +20,11 @@ from book_agent.domain.enums import (
     ExportType,
     IssueStatus,
     JobScopeType,
+    MemoryProposalStatus,
     PacketStatus,
     SourceType,
 )
-from book_agent.domain.models import Chapter, ChapterWorklistAssignment, Document, Sentence
+from book_agent.domain.models import Chapter, ChapterMemoryProposal, ChapterWorklistAssignment, Document, Sentence
 from book_agent.domain.models.ops import AuditEvent, DocumentRun, RunAuditEvent
 from book_agent.domain.models.review import (
     ChapterQualitySummary as PersistedChapterQualitySummary,
@@ -183,6 +184,28 @@ class DocumentTranslationResult:
     review_required_sentence_ids: list[str]
     memory_commit_mode: str
     recorded_memory_proposal_count: int
+
+
+@dataclass(slots=True)
+class ChapterMemoryProposalSummary:
+    proposal_id: str
+    packet_id: str
+    translation_run_id: str
+    status: str
+    base_snapshot_version: int | None
+    committed_snapshot_id: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
+class ChapterMemoryProposalDecisionResult:
+    document_id: str
+    chapter_id: str
+    decision: str
+    proposal: ChapterMemoryProposalSummary
+    committed_snapshot_id: str | None = None
+    committed_snapshot_version: int | None = None
 
 
 def _display_author_value(author: str | None) -> str | None:
@@ -792,6 +815,7 @@ class DocumentWorkflowService:
             worker=translation_worker,
             default_auto_commit_memory=translation_auto_commit_memory,
         )
+        self.memory_service = self.translation_service.memory_service
         self.review_service = ReviewService(self.review_repository)
         self.export_service = ExportService(
             self.export_repository,
@@ -1318,6 +1342,64 @@ class DocumentWorkflowService:
             total_action_count=0,
             auto_execute_packet_followups=auto_execute_packet_followups,
             max_auto_followup_attempts=max_auto_followup_attempts,
+        )
+
+    def list_chapter_memory_proposals(
+        self,
+        document_id: str,
+        chapter_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[ChapterMemoryProposalSummary]:
+        normalized_status = None
+        if status is not None:
+            normalized_status = MemoryProposalStatus(str(status).strip().lower())
+        proposals = self.memory_service.list_chapter_proposals(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            status=normalized_status,
+        )
+        return [self._to_chapter_memory_proposal_summary(proposal) for proposal in proposals]
+
+    def approve_chapter_memory_proposal(
+        self,
+        document_id: str,
+        chapter_id: str,
+        proposal_id: str,
+    ) -> ChapterMemoryProposalDecisionResult:
+        committed_snapshot = self.memory_service.approve_proposal(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            proposal_id=proposal_id,
+        )
+        proposal = self.memory_service.chapter_memory_repository.load_proposal(proposal_id=proposal_id)
+        if proposal is None:
+            raise ValueError(f"Chapter memory proposal not found after approval: {proposal_id}")
+        return ChapterMemoryProposalDecisionResult(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            decision="approved",
+            proposal=self._to_chapter_memory_proposal_summary(proposal),
+            committed_snapshot_id=committed_snapshot.id,
+            committed_snapshot_version=committed_snapshot.version,
+        )
+
+    def reject_chapter_memory_proposal(
+        self,
+        document_id: str,
+        chapter_id: str,
+        proposal_id: str,
+    ) -> ChapterMemoryProposalDecisionResult:
+        proposal = self.memory_service.reject_proposal(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            proposal_id=proposal_id,
+        )
+        return ChapterMemoryProposalDecisionResult(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            decision="rejected",
+            proposal=self._to_chapter_memory_proposal_summary(proposal),
         )
 
     def repair_document_blockers_until_exportable(
@@ -2198,6 +2280,21 @@ class DocumentWorkflowService:
         return ActionWorkflowResult(
             action_execution=action_execution,
             rerun_execution=rerun_execution,
+        )
+
+    def _to_chapter_memory_proposal_summary(
+        self,
+        proposal: ChapterMemoryProposal,
+    ) -> ChapterMemoryProposalSummary:
+        return ChapterMemoryProposalSummary(
+            proposal_id=proposal.id,
+            packet_id=proposal.packet_id,
+            translation_run_id=proposal.translation_run_id,
+            status=proposal.status.value,
+            base_snapshot_version=proposal.base_snapshot_version,
+            committed_snapshot_id=proposal.committed_snapshot_id,
+            created_at=proposal.created_at.isoformat(),
+            updated_at=proposal.updated_at.isoformat(),
         )
 
     def get_document_export_dashboard(

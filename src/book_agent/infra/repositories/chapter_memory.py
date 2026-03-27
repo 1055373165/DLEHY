@@ -73,6 +73,24 @@ class ChapterTranslationMemoryRepository:
             select(ChapterMemoryProposal).where(ChapterMemoryProposal.translation_run_id == translation_run_id)
         ).first()
 
+    def load_proposal(self, *, proposal_id: str) -> ChapterMemoryProposal | None:
+        return self.session.get(ChapterMemoryProposal, proposal_id)
+
+    def list_proposals_for_chapter(
+        self,
+        *,
+        chapter_id: str,
+        status: MemoryProposalStatus | None = None,
+    ) -> list[ChapterMemoryProposal]:
+        stmt = (
+            select(ChapterMemoryProposal)
+            .where(ChapterMemoryProposal.chapter_id == chapter_id)
+            .order_by(ChapterMemoryProposal.created_at.asc(), ChapterMemoryProposal.translation_run_id.asc())
+        )
+        if status is not None:
+            stmt = stmt.where(ChapterMemoryProposal.status == status)
+        return self.session.scalars(stmt).all()
+
     def list_proposals_for_translation_runs(
         self,
         *,
@@ -176,6 +194,16 @@ class ChapterTranslationMemoryRepository:
         proposal.status = MemoryProposalStatus.COMMITTED
         proposal.committed_snapshot_id = committed_snapshot.id
         proposal.committed_at = now
+        proposal.updated_at = now
+        self.session.merge(proposal)
+        self.session.flush()
+        return proposal
+
+    def mark_proposal_rejected(self, proposal: ChapterMemoryProposal) -> ChapterMemoryProposal:
+        if proposal.status == MemoryProposalStatus.REJECTED:
+            return proposal
+        now = _utcnow()
+        proposal.status = MemoryProposalStatus.REJECTED
         proposal.updated_at = now
         self.session.merge(proposal)
         self.session.flush()

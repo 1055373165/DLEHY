@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from typing import Iterable
 
+from book_agent.domain.enums import MemoryProposalStatus
 from book_agent.domain.models import ChapterMemoryProposal, MemorySnapshot
 from book_agent.infra.repositories.chapter_memory import ChapterTranslationMemoryRepository
 from book_agent.services.context_compile import ChapterContextCompileOptions, ChapterContextCompiler
@@ -109,6 +110,62 @@ class MemoryService:
             )
         return retired
 
+    def list_chapter_proposals(
+        self,
+        *,
+        document_id: str,
+        chapter_id: str,
+        status: "MemoryProposalStatus | None" = None,
+    ) -> list[ChapterMemoryProposal]:
+        proposals = self.chapter_memory_repository.list_proposals_for_chapter(
+            chapter_id=chapter_id,
+            status=status,
+        )
+        return [proposal for proposal in proposals if proposal.document_id == document_id]
+
+    def approve_proposal(
+        self,
+        *,
+        document_id: str,
+        chapter_id: str,
+        proposal_id: str,
+    ) -> MemorySnapshot:
+        proposal = self.chapter_memory_repository.load_proposal(proposal_id=proposal_id)
+        if proposal is None:
+            raise ValueError(f"Chapter memory proposal not found: {proposal_id}")
+        if proposal.document_id != document_id or proposal.chapter_id != chapter_id:
+            raise ValueError(f"Chapter memory proposal does not belong to {document_id}/{chapter_id}: {proposal_id}")
+        if proposal.status == MemoryProposalStatus.COMMITTED:
+            if proposal.committed_snapshot_id is None:
+                raise ValueError(f"Committed chapter memory proposal is missing snapshot id: {proposal_id}")
+            committed_snapshot = self.chapter_memory_repository.session.get(MemorySnapshot, proposal.committed_snapshot_id)
+            if committed_snapshot is None:
+                raise ValueError(f"Committed chapter memory snapshot not found: {proposal.committed_snapshot_id}")
+            return committed_snapshot
+        if proposal.status != MemoryProposalStatus.PROPOSED:
+            raise ValueError(f"Chapter memory proposal is not pending approval: {proposal_id}")
+        return self.commit_approved_packet_memory(
+            document_id=document_id,
+            chapter_id=chapter_id,
+            translation_run_id=proposal.translation_run_id,
+        )
+
+    def reject_proposal(
+        self,
+        *,
+        document_id: str,
+        chapter_id: str,
+        proposal_id: str,
+    ) -> ChapterMemoryProposal:
+        proposal = self.chapter_memory_repository.load_proposal(proposal_id=proposal_id)
+        if proposal is None:
+            raise ValueError(f"Chapter memory proposal not found: {proposal_id}")
+        if proposal.document_id != document_id or proposal.chapter_id != chapter_id:
+            raise ValueError(f"Chapter memory proposal does not belong to {document_id}/{chapter_id}: {proposal_id}")
+        if proposal.status == MemoryProposalStatus.COMMITTED:
+            raise ValueError(f"Committed chapter memory proposal cannot be rejected: {proposal_id}")
+        return self.chapter_memory_repository.mark_proposal_rejected(proposal)
+
     def commit_approved_packet_memory(
         self,
         *,
@@ -121,6 +178,10 @@ class MemoryService:
         )
         if proposal is None:
             raise ValueError(f"No chapter memory proposal found for translation run {translation_run_id}")
+        self.chapter_memory_repository.retire_pending_proposals_for_packet(
+            packet_id=proposal.packet_id,
+            keep_translation_run_id=proposal.translation_run_id,
+        )
 
         latest_snapshot = self.load_latest_chapter_memory(document_id=document_id, chapter_id=chapter_id)
         if (

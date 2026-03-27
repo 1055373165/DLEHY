@@ -893,6 +893,95 @@ class MemoryServiceTests(unittest.TestCase):
             assert latest_snapshot is not None
             self.assertGreater(latest_snapshot.version, 2)
 
+    def test_document_workflow_can_list_and_reject_pending_chapter_memory_proposal(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        target_packet_id = self._find_packet_with_text(packet_ids, "Context engineering")
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            workflow = DocumentWorkflowService(session)
+            translate_result = workflow.translate_document(document_id, packet_ids=[target_packet_id])
+            session.commit()
+
+            self.assertEqual(translate_result.memory_commit_mode, "proposal_first")
+            proposals = workflow.list_chapter_memory_proposals(document_id, chapter.id, status="proposed")
+            self.assertEqual(len(proposals), 1)
+            self.assertEqual(proposals[0].packet_id, target_packet_id)
+
+            decision = workflow.reject_chapter_memory_proposal(
+                document_id=document_id,
+                chapter_id=chapter.id,
+                proposal_id=proposals[0].proposal_id,
+            )
+            session.commit()
+
+            self.assertEqual(decision.decision, "rejected")
+            self.assertEqual(decision.proposal.status, MemoryProposalStatus.REJECTED.value)
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+            self.assertEqual(len(proposals), 1)
+            self.assertEqual(proposals[0].status, MemoryProposalStatus.REJECTED)
+
+    def test_document_workflow_can_approve_specific_chapter_memory_proposal(self) -> None:
+        document_id, packet_ids = self._bootstrap_to_db()
+        target_packet_id = self._find_packet_with_text(packet_ids, "Context engineering")
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            assert chapter is not None
+            self._seed_chapter_memory_snapshot(document_id=document_id, chapter_id=chapter.id)
+
+            workflow = DocumentWorkflowService(session)
+            workflow.translate_document(document_id, packet_ids=[target_packet_id])
+            pending = workflow.list_chapter_memory_proposals(document_id, chapter.id, status="proposed")
+            self.assertEqual(len(pending), 1)
+
+            decision = workflow.approve_chapter_memory_proposal(
+                document_id=document_id,
+                chapter_id=chapter.id,
+                proposal_id=pending[0].proposal_id,
+            )
+            session.commit()
+
+            self.assertEqual(decision.decision, "approved")
+            self.assertEqual(decision.proposal.status, MemoryProposalStatus.COMMITTED.value)
+            self.assertIsNotNone(decision.committed_snapshot_id)
+            self.assertEqual(decision.committed_snapshot_version, 3)
+
+        with self.session_factory() as session:
+            chapter = session.scalars(select(Chapter).where(Chapter.document_id == document_id)).first()
+            latest_snapshot = session.scalars(
+                select(MemorySnapshot)
+                .where(
+                    MemorySnapshot.document_id == document_id,
+                    MemorySnapshot.scope_type == MemoryScopeType.CHAPTER,
+                    MemorySnapshot.scope_id == chapter.id,
+                    MemorySnapshot.snapshot_type == SnapshotType.CHAPTER_TRANSLATION_MEMORY,
+                    MemorySnapshot.status == MemoryStatus.ACTIVE,
+                )
+                .order_by(MemorySnapshot.version.desc())
+            ).first()
+            proposals = session.scalars(
+                select(ChapterMemoryProposal)
+                .where(ChapterMemoryProposal.chapter_id == chapter.id)
+                .order_by(ChapterMemoryProposal.created_at.asc())
+            ).all()
+
+            self.assertIsNotNone(latest_snapshot)
+            assert latest_snapshot is not None
+            self.assertEqual(latest_snapshot.version, 3)
+            self.assertEqual(len(proposals), 1)
+            self.assertEqual(proposals[0].status, MemoryProposalStatus.COMMITTED)
+
 
 if __name__ == "__main__":
     unittest.main()
