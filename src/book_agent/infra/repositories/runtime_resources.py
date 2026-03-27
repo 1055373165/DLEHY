@@ -106,6 +106,41 @@ class RuntimeResourcesRepository:
         self.session.flush()
         return chapter_run
 
+    def update_chapter_run(
+        self,
+        chapter_run_id: str,
+        *,
+        conditions_json: dict[str, Any] | None = None,
+        status_detail_json: dict[str, Any] | None = None,
+        last_reconciled_at: datetime | None | object = _UNSET,
+    ) -> ChapterRun:
+        chapter_run = self.get_chapter_run(chapter_run_id)
+        now = _utcnow()
+        if conditions_json is not None:
+            chapter_run.conditions_json = dict(conditions_json)
+        if status_detail_json is not None:
+            chapter_run.status_detail_json = dict(status_detail_json)
+        if last_reconciled_at is not _UNSET:
+            chapter_run.last_reconciled_at = last_reconciled_at
+        chapter_run.updated_at = now
+        self.session.add(chapter_run)
+        self.session.flush()
+        return chapter_run
+
+    def merge_chapter_run_conditions(self, chapter_run_id: str, patch: dict[str, Any]) -> ChapterRun:
+        chapter_run = self.get_chapter_run(chapter_run_id)
+        return self.update_chapter_run(
+            chapter_run_id,
+            conditions_json=_merge_json(chapter_run.conditions_json, patch),
+        )
+
+    def merge_chapter_run_status_detail(self, chapter_run_id: str, patch: dict[str, Any]) -> ChapterRun:
+        chapter_run = self.get_chapter_run(chapter_run_id)
+        return self.update_chapter_run(
+            chapter_run_id,
+            status_detail_json=_merge_json(chapter_run.status_detail_json, patch),
+        )
+
     def get_packet_task(self, packet_task_id: str) -> PacketTask:
         packet_task = self.session.get(PacketTask, packet_task_id)
         if packet_task is None:
