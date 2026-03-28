@@ -38,9 +38,9 @@ export function DeliverablesPage() {
     <div className={styles.layout}>
       <div className={styles.heroGrid}>
         <Surface
-          eyebrow="Deliverables"
+          eyebrow="交付"
           title="交付资产"
-          description="只展示现在能下载什么，以及每个资产离可交付还有多远。"
+          description="只展示现在能下载什么，以及每个资产距离可交付还有多远。"
           aside={currentDocument ? <StatusBadge tone={badge.tone} label={badge.label} /> : null}
         >
           {currentDocument ? (
@@ -72,7 +72,7 @@ export function DeliverablesPage() {
         </Surface>
 
         <Surface
-          eyebrow="Gate"
+          eyebrow="阻塞"
           title="为什么现在能否交付"
           description="把阻塞解释成用户可以直接判断的语言，不再堆底层诊断字段。"
           aside={
@@ -121,7 +121,7 @@ export function DeliverablesPage() {
       </div>
 
       <Surface
-        eyebrow="Recent Exports"
+        eyebrow="记录"
         title="最近导出记录"
         description="如果需要追查最近一次交付，这里保留最短路径。"
         aside={currentDocument ? preferredTitle(currentDocument) : null}

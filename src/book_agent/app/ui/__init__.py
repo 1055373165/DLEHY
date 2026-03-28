@@ -1,1 +1,1 @@
-"""UI entrypoints for the book-agent operator frontend."""
+"""Minimal service entrypoints for the book-agent backend."""

@@ -70,9 +70,9 @@ export const DELIVERY_ASSETS = [
   },
   {
     key: "review_package" as const,
-    title: "Review Package",
+    title: "复核包",
     label: "诊断包",
-    buttonText: "下载 Review Package",
+    buttonText: "下载复核包",
   },
 ];
 

@@ -15,38 +15,50 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from book_agent.app.main import create_app
+from book_agent.core.config import get_settings
 
 
 class FrontendEntryTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.app = create_app()
-        self.client = TestClient(self.app)
-
     def tearDown(self) -> None:
-        self.client.close()
+        get_settings.cache_clear()
+        os.environ.pop("BOOK_AGENT_CORS_ALLOW_ORIGINS", None)
 
-    def test_root_returns_product_frontend(self) -> None:
-        response = self.client.get("/")
+    def _build_client(self) -> TestClient:
+        get_settings.cache_clear()
+        return TestClient(create_app())
+
+    def test_root_returns_minimal_service_entry(self) -> None:
+        with self._build_client() as client:
+            response = client.get("/")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
         body = response.text
-        self.assertIn("Book Agent Pressroom", body)
-        self.assertIn("整书译制工作台", body)
-        self.assertIn("把一本英文书，从原稿推进到中文交付。", body)
-        self.assertIn("拖入书籍文件，或点击选择", body)
-        self.assertIn("当前书籍", body)
-        self.assertIn("运行总览", body)
-        self.assertIn("交付资产", body)
-        self.assertIn("复核与阻塞", body)
-        self.assertIn("Review Package", body)
-        self.assertIn("书库历史", body)
-        self.assertIn("搜索标题、作者、路径或 document id", body)
-        self.assertIn("重试上次转换", body)
-        self.assertIn("刷新并准备重试", body)
-        self.assertIn("translation-studio", body)
-        self.assertIn("bootstrap-upload", body)
-        self.assertIn("/documents/history", body)
-        self.assertIn("/runs/", body)
+        self.assertIn("Book Agent Service", body)
+        self.assertIn("standalone React/Vite frontend", body)
+        self.assertIn("Swagger UI", body)
         self.assertIn("/v1/docs", body)
+        self.assertIn("/v1/openapi.json", body)
         self.assertIn("/v1/health", body)
+
+    def test_cors_allowlist_enables_preflight_for_api(self) -> None:
+        os.environ["BOOK_AGENT_CORS_ALLOW_ORIGINS"] = "https://workspace.example"
+
+        with self._build_client() as client:
+            response = client.options(
+                "/v1/health",
+                headers={
+                    "Origin": "https://workspace.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+        self.assertIn(response.status_code, {200, 204})
+        self.assertEqual(
+            response.headers.get("access-control-allow-origin"),
+            "https://workspace.example",
+        )
+        self.assertEqual(
+            response.headers.get("access-control-allow-credentials"),
+            "true",
+        )

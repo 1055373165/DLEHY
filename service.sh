@@ -12,10 +12,10 @@
 #    ./service.sh start --reload # Start backend with uvicorn auto-reload
 #
 #  Notes:
-#    - The current Web UI is served directly by FastAPI, so there is no
-#      separate frontend process by default.
-#    - If a standalone frontend is added later, set BOOK_AGENT_FRONTEND_CMD
-#      (and optionally BOOK_AGENT_FRONTEND_DIR) to let this script manage it.
+#    - The backend now serves APIs and a minimal service entry only.
+#    - If ./frontend/package.json exists, this script will also start the
+#      standalone React/Vite frontend by default.
+#    - Set BOOK_AGENT_DISABLE_FRONTEND=1 to run backend-only.
 # ------------------------------------------------------------------
 set -euo pipefail
 
@@ -30,9 +30,17 @@ DEFAULT_SQLITE_DATABASE_URL="sqlite+pysqlite:///$ROOT_DIR/artifacts/book-agent.d
 
 HOST="${BOOK_AGENT_HOST:-127.0.0.1}"
 PORT="${BOOK_AGENT_PORT:-8999}"
+DEFAULT_FRONTEND_DIR="$ROOT_DIR/frontend"
+FRONTEND_PORT="${BOOK_AGENT_FRONTEND_PORT:-4173}"
 FRONTEND_CMD="${BOOK_AGENT_FRONTEND_CMD:-}"
-FRONTEND_DIR="${BOOK_AGENT_FRONTEND_DIR:-$ROOT_DIR}"
+FRONTEND_DIR="${BOOK_AGENT_FRONTEND_DIR:-$DEFAULT_FRONTEND_DIR}"
 FRONTEND_NAME="${BOOK_AGENT_FRONTEND_NAME:-frontend}"
+FRONTEND_DISABLED="${BOOK_AGENT_DISABLE_FRONTEND:-0}"
+FRONTEND_URL="http://${HOST}:${FRONTEND_PORT}"
+
+if [[ "$FRONTEND_DISABLED" != "1" ]] && [[ -z "$FRONTEND_CMD" ]] && [[ -f "$FRONTEND_DIR/package.json" ]]; then
+    FRONTEND_CMD="npm run dev -- --host 0.0.0.0 --port ${FRONTEND_PORT}"
+fi
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -65,9 +73,11 @@ Options:
 Environment overrides:
   BOOK_AGENT_HOST          default 127.0.0.1
   BOOK_AGENT_PORT          default 8999
+  BOOK_AGENT_FRONTEND_PORT default 4173
   BOOK_AGENT_FRONTEND_CMD  optional standalone frontend start command
-  BOOK_AGENT_FRONTEND_DIR  optional working directory for frontend command
+  BOOK_AGENT_FRONTEND_DIR  default ./frontend
   BOOK_AGENT_FRONTEND_NAME optional label for status output
+  BOOK_AGENT_DISABLE_FRONTEND set to 1 to run backend-only
 
 Examples:
   ./service.sh
@@ -177,6 +187,27 @@ frontend_configured() {
     [[ -n "$FRONTEND_CMD" ]]
 }
 
+prepare_frontend_runtime() {
+    if ! frontend_configured; then
+        return
+    fi
+    if [[ ! -f "$FRONTEND_DIR/package.json" ]]; then
+        error "Frontend package.json not found in $FRONTEND_DIR"
+        exit 1
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        error "npm is required to run the standalone frontend but was not found."
+        exit 1
+    fi
+    if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+        info "Installing frontend dependencies in ${FRONTEND_DIR}..."
+        (
+            cd "$FRONTEND_DIR"
+            npm install
+        )
+    fi
+}
+
 frontend_running() {
     if ! frontend_configured; then
         return 1
@@ -269,8 +300,8 @@ start_backend() {
     if backend_running; then
         local pid
         pid="$(read_pid "$BACKEND_PID_FILE")"
-        error "Backend already running (PID: $pid)."
-        exit 1
+        info "Backend already running (PID: $pid)."
+        return
     fi
 
     info "Starting backend on ${CYAN}http://${HOST}:${PORT}${NC} ..."
@@ -296,18 +327,20 @@ start_backend() {
 
 start_frontend() {
     if ! frontend_configured; then
-        info "Frontend UI is currently served by FastAPI; no separate frontend process to start."
+        info "No standalone frontend process configured; backend will serve API + service entry only."
         return
     fi
 
     if frontend_running; then
         local pid
         pid="$(read_pid "$FRONTEND_PID_FILE")"
-        error "${FRONTEND_NAME} already running (PID: $pid)."
-        exit 1
+        info "${FRONTEND_NAME} already running (PID: $pid)."
+        return
     fi
 
-    info "Starting ${FRONTEND_NAME} using: ${FRONTEND_CMD}"
+    prepare_frontend_runtime
+
+    info "Starting ${FRONTEND_NAME} on ${CYAN}${FRONTEND_URL}${NC} using: ${FRONTEND_CMD}"
     (
         cd "$FRONTEND_DIR"
         nohup /bin/bash -lc "$FRONTEND_CMD" >> "$FRONTEND_LOG_FILE" 2>&1 &
@@ -329,7 +362,7 @@ start_frontend() {
 
 stop_frontend() {
     if ! frontend_configured; then
-        info "Frontend UI is embedded in backend; no separate frontend process to stop."
+        info "No standalone frontend process configured; nothing to stop."
         return
     fi
     stop_pid_file "$FRONTEND_PID_FILE" "$FRONTEND_NAME"
@@ -371,12 +404,13 @@ print_status() {
     if frontend_configured; then
         if frontend_running; then
             info "Frontend: running (PID: $(read_pid "$FRONTEND_PID_FILE"))"
+            info "          ${CYAN}${FRONTEND_URL}${NC}"
             info "          logs -> $FRONTEND_LOG_FILE"
         else
             warn "Frontend: stopped"
         fi
     else
-        info "Frontend: embedded in backend FastAPI UI (no standalone process configured)"
+        info "Frontend: not configured (backend serves minimal service entry only)"
     fi
 
     if command -v docker >/dev/null 2>&1 && docker compose ps --status running 2>/dev/null | grep -q postgres; then
@@ -394,11 +428,12 @@ start_all() {
 
     echo ""
     info "${BOLD}book-agent services are running${NC}"
-    info "  Homepage: ${CYAN}http://${HOST}:${PORT}${NC}"
+    info "  Backend:  ${CYAN}http://${HOST}:${PORT}${NC}"
     info "  API Docs: ${CYAN}http://${HOST}:${PORT}/v1/docs${NC}"
     info "  Logs:     $BACKEND_LOG_FILE"
     if frontend_configured; then
-        info "  Frontend: $FRONTEND_LOG_FILE"
+        info "  Frontend: ${CYAN}${FRONTEND_URL}${NC}"
+        info "            $FRONTEND_LOG_FILE"
     fi
     info "  Status:   ${BOLD}./service.sh status${NC}"
 }

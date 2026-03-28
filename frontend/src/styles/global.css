@@ -10,10 +10,7 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top left, rgba(168, 106, 57, 0.18), transparent 24%),
-    radial-gradient(circle at top right, rgba(21, 35, 50, 0.11), transparent 22%),
-    linear-gradient(180deg, #f8f3ea 0%, var(--bg-canvas) 54%, #e6dfd2 100%);
+  background: linear-gradient(180deg, #f8fafc 0%, var(--bg-canvas) 100%);
   color: var(--surface-ink);
   font-family: var(--font-body);
   line-height: 1.5;
@@ -22,16 +19,7 @@ body {
 }
 
 body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.22) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
-  background-size: 160px 160px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.3), transparent 72%);
-  opacity: 0.32;
+  display: none;
 }
 
 #root {
@@ -80,7 +68,7 @@ input:focus-visible,
 select:focus-visible,
 a:focus-visible,
 summary:focus-visible {
-  outline: 2px solid rgba(23, 58, 76, 0.34);
+  outline: 2px solid rgba(44, 91, 131, 0.28);
   outline-offset: 2px;
 }
 
@@ -93,7 +81,7 @@ summary::-webkit-details-marker {
 }
 
 ::selection {
-  background: rgba(168, 106, 57, 0.18);
+  background: rgba(44, 91, 131, 0.16);
   color: var(--surface-ink);
 }
 

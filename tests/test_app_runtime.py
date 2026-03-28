@@ -267,6 +267,7 @@ class AppRuntimeTests(unittest.TestCase):
         metadata = json.loads(row[3])
         self.assertEqual(metadata["document_title"]["resolution_source"], "source_filename")
 
+
     def test_create_app_returns_503_when_database_is_unavailable(self) -> None:
         self._set_env(
             "BOOK_AGENT_DATABASE_URL",

@@ -61,11 +61,14 @@ def build_session_factory(engine: Engine | None = None, database_url: str | None
 
 
 @contextmanager
-def session_scope(session_factory: sessionmaker) -> Iterator[Session]:
+def session_scope(session_factory: sessionmaker, *, commit_on_exit: bool = True) -> Iterator[Session]:
     session = session_factory()
     try:
         yield session
-        session.commit()
+        if commit_on_exit:
+            session.commit()
+        else:
+            session.rollback()
     except Exception:
         session.rollback()
         raise

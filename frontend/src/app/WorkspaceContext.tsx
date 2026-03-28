@@ -10,12 +10,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   approveChapterMemoryProposal,
+  assignDocumentChapterWorklistOwner,
+  clearDocumentChapterWorklistAssignment,
+  executeIssueAction,
   rejectChapterMemoryProposal,
   SERVICE_LINKS,
   createRun,
   downloadChapterExport,
   downloadDocumentExport,
   getDocument,
+  getDocumentChapterWorklist,
   getDocumentChapterWorklistDetail,
   getDocumentExports,
   getHealth,
@@ -27,10 +31,17 @@ import {
   uploadDocument,
   type ChapterMemoryProposalDecisionResponse,
   type ChapterMemoryProposalDecisionPayload,
+  type ChapterWorklistAssignment,
+  type ChapterWorklistAssignmentClearResponse,
+  type ChapterWorklistAssignmentRequest,
+  type ChapterWorklistAssignmentClearRequest,
+  type DocumentChapterWorklist,
+  type DocumentChapterWorklistFilters,
   type DocumentChapterWorklistDetail,
   type DocumentExportDashboard,
   type DocumentHistoryEntry,
   type DocumentRunSummary,
+  type ExecuteActionResponse,
   type DocumentSummary,
   type HealthResponse,
   type RunAuditEvent,
@@ -52,6 +63,18 @@ interface WorkspaceContextValue {
   currentExports: DocumentExportDashboard | null;
   selectedReviewChapterId: string | null;
   selectReviewChapter: (chapterId: string | null) => void;
+  chapterWorklistFilters: {
+    queuePriority: "all" | "immediate" | "high" | "medium";
+    assignment: "all" | "assigned" | "unassigned";
+    assignedOwnerName: string;
+  };
+  setChapterQueuePriorityFilter: (value: "all" | "immediate" | "high" | "medium") => void;
+  setChapterAssignmentFilter: (value: "all" | "assigned" | "unassigned") => void;
+  setChapterAssignedOwnerFilter: (value: string) => void;
+  clearChapterWorklistFilters: () => void;
+  chapterWorklist: DocumentChapterWorklist | null;
+  chapterWorklistLoading: boolean;
+  chapterWorklistError: string | null;
   currentChapterReviewDetail: DocumentChapterWorklistDetail | null;
   currentChapterReviewLoading: boolean;
   currentChapterReviewError: string | null;
@@ -59,6 +82,8 @@ interface WorkspaceContextValue {
   uploadPending: boolean;
   runActionPending: boolean;
   reviewDecisionPending: boolean;
+  assignmentPending: boolean;
+  actionExecutionPending: boolean;
   uploadFile: (file: File) => Promise<DocumentSummary>;
   runPrimaryAction: () => Promise<DocumentRunSummary>;
   refreshCurrentDocument: () => Promise<void>;
@@ -70,6 +95,15 @@ interface WorkspaceContextValue {
     proposalId: string,
     payload: ChapterMemoryProposalDecisionPayload
   ) => Promise<ChapterMemoryProposalDecisionResponse>;
+  assignChapterOwner: (
+    chapterId: string,
+    payload: ChapterWorklistAssignmentRequest
+  ) => Promise<ChapterWorklistAssignment>;
+  clearChapterAssignment: (
+    chapterId: string,
+    payload: ChapterWorklistAssignmentClearRequest
+  ) => Promise<ChapterWorklistAssignmentClearResponse>;
+  executeChapterAction: (actionId: string, runFollowup?: boolean) => Promise<ExecuteActionResponse>;
   downloadAsset: (
     exportType: "merged_html" | "bilingual_html" | "review_package"
   ) => Promise<string>;
@@ -77,6 +111,11 @@ interface WorkspaceContextValue {
 }
 
 const STORAGE_KEY_DOCUMENT = "book-agent.current-document-id";
+const DEFAULT_CHAPTER_WORKLIST_FILTERS = {
+  queuePriority: "all",
+  assignment: "all",
+  assignedOwnerName: "",
+} as const;
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
@@ -106,6 +145,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     typeof window === "undefined" ? null : readStoredDocumentId()
   );
   const [selectedReviewChapterId, setSelectedReviewChapterId] = useState<string | null>(null);
+  const [chapterWorklistFilters, setChapterWorklistFilters] = useState<{
+    queuePriority: "all" | "immediate" | "high" | "medium";
+    assignment: "all" | "assigned" | "unassigned";
+    assignedOwnerName: string;
+  }>({ ...DEFAULT_CHAPTER_WORKLIST_FILTERS });
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -150,6 +194,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     refetchInterval: isRunActive(currentRunQuery.data?.status || currentDocumentQuery.data?.latest_run_status) ? 2500 : false,
   });
 
+  const chapterWorklistApiFilters: DocumentChapterWorklistFilters = {
+    limit: 50,
+    offset: 0,
+    queuePriority:
+      chapterWorklistFilters.queuePriority === "all"
+        ? undefined
+        : chapterWorklistFilters.queuePriority,
+    assigned:
+      chapterWorklistFilters.assignment === "all"
+        ? undefined
+        : chapterWorklistFilters.assignment === "assigned",
+    assignedOwnerName: chapterWorklistFilters.assignedOwnerName || undefined,
+  };
+
+  const currentChapterWorklistQuery = useQuery({
+    queryKey: [
+      "chapter-worklist",
+      selectedDocumentId,
+      chapterWorklistFilters.queuePriority,
+      chapterWorklistFilters.assignment,
+      chapterWorklistFilters.assignedOwnerName,
+    ],
+    enabled: Boolean(selectedDocumentId),
+    queryFn: () => getDocumentChapterWorklist(selectedDocumentId as string, chapterWorklistApiFilters),
+    refetchInterval: isRunActive(
+      currentRunQuery.data?.status || currentDocumentQuery.data?.latest_run_status
+    )
+      ? 2500
+      : false,
+    retry: false,
+  });
+
   const currentChapterReviewQuery = useQuery({
     queryKey: ["chapter-worklist-detail", selectedDocumentId, selectedReviewChapterId],
     enabled: Boolean(selectedDocumentId && selectedReviewChapterId),
@@ -181,7 +257,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [bootstrapHistoryQuery.data, selectedDocumentId]);
 
   useEffect(() => {
+    const queueEntries = currentChapterWorklistQuery.data?.entries ?? [];
     const chapters = currentDocumentQuery.data?.chapters ?? [];
+    if (queueEntries.length) {
+      const stillInQueue = selectedReviewChapterId
+        ? queueEntries.some((entry) => entry.chapter_id === selectedReviewChapterId)
+        : false;
+      if (stillInQueue) {
+        return;
+      }
+      startTransition(() => {
+        setSelectedReviewChapterId(queueEntries[0]?.chapter_id ?? null);
+      });
+      return;
+    }
     if (!chapters.length) {
       if (selectedReviewChapterId) {
         startTransition(() => {
@@ -190,18 +279,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
-    const stillValid = selectedReviewChapterId
+    const stillInDocument = selectedReviewChapterId
       ? chapters.some((chapter) => chapter.chapter_id === selectedReviewChapterId)
       : false;
-    if (stillValid) {
+    if (stillInDocument) {
       return;
     }
     const preferredChapter =
-      chapters.find((chapter) => chapter.open_issue_count > 0)?.chapter_id ?? chapters[0]?.chapter_id ?? null;
+      queueEntries[0]?.chapter_id ??
+      chapters.find((chapter) => chapter.open_issue_count > 0)?.chapter_id ??
+      chapters[0]?.chapter_id ??
+      null;
     startTransition(() => {
       setSelectedReviewChapterId(preferredChapter);
     });
-  }, [currentDocumentQuery.data?.chapters, selectedReviewChapterId]);
+  }, [currentChapterWorklistQuery.data?.entries, currentDocumentQuery.data?.chapters, selectedReviewChapterId]);
 
   useEffect(() => {
     const message = currentDocumentQuery.error instanceof Error ? currentDocumentQuery.error.message : "";
@@ -224,13 +316,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     });
   }
 
+  function setChapterQueuePriorityFilter(value: "all" | "immediate" | "high" | "medium"): void {
+    startTransition(() => {
+      setChapterWorklistFilters((current) => ({ ...current, queuePriority: value }));
+    });
+  }
+
+  function setChapterAssignmentFilter(value: "all" | "assigned" | "unassigned"): void {
+    startTransition(() => {
+      setChapterWorklistFilters((current) => ({ ...current, assignment: value }));
+    });
+  }
+
+  function setChapterAssignedOwnerFilter(value: string): void {
+    startTransition(() => {
+      setChapterWorklistFilters((current) => ({ ...current, assignedOwnerName: value }));
+    });
+  }
+
+  function clearChapterWorklistFilters(): void {
+    startTransition(() => {
+      setChapterWorklistFilters({ ...DEFAULT_CHAPTER_WORKLIST_FILTERS });
+    });
+  }
+
   async function invalidateWorkspaceQueries(): Promise<void> {
     await queryClient.invalidateQueries({
       predicate(query) {
         const rootKey = String(query.queryKey[0] ?? "");
-        return ["document", "run", "run-events", "document-exports", "document-history"].includes(
-          rootKey
-        );
+        return [
+          "document",
+          "run",
+          "run-events",
+          "document-exports",
+          "document-history",
+          "chapter-worklist",
+          "chapter-worklist-detail",
+        ].includes(rootKey);
       },
     });
   }
@@ -333,8 +455,62 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         queryKey: ["chapter-worklist-detail", selectedDocumentId, selectedReviewChapterId],
       });
       await queryClient.invalidateQueries({
+        queryKey: ["chapter-worklist", selectedDocumentId],
+      });
+      await queryClient.invalidateQueries({
         queryKey: ["document", selectedDocumentId],
       });
+    },
+  });
+
+  const assignmentMutation = useMutation({
+    mutationFn: async ({
+      chapterId,
+      mode,
+      payload,
+    }: {
+      chapterId: string;
+      mode: "assign" | "clear";
+      payload: ChapterWorklistAssignmentRequest | ChapterWorklistAssignmentClearRequest;
+    }) => {
+      if (!selectedDocumentId) {
+        throw new Error("当前没有可操作的书籍。");
+      }
+      return mode === "assign"
+        ? assignDocumentChapterWorklistOwner(
+            selectedDocumentId,
+            chapterId,
+            payload as ChapterWorklistAssignmentRequest
+          )
+        : clearDocumentChapterWorklistAssignment(
+            selectedDocumentId,
+            chapterId,
+            payload as ChapterWorklistAssignmentClearRequest
+          );
+    },
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["chapter-worklist", selectedDocumentId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["chapter-worklist-detail", selectedDocumentId, variables.chapterId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["document", selectedDocumentId],
+      });
+    },
+  });
+
+  const actionExecutionMutation = useMutation({
+    mutationFn: async ({
+      actionId,
+      runFollowup,
+    }: {
+      actionId: string;
+      runFollowup: boolean;
+    }) => executeIssueAction(actionId, { runFollowup }),
+    onSuccess: async () => {
+      await invalidateWorkspaceQueries();
     },
   });
 
@@ -370,6 +546,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     currentExports: currentExportsQuery.data ?? null,
     selectedReviewChapterId,
     selectReviewChapter,
+    chapterWorklistFilters,
+    setChapterQueuePriorityFilter,
+    setChapterAssignmentFilter,
+    setChapterAssignedOwnerFilter,
+    clearChapterWorklistFilters,
+    chapterWorklist: currentChapterWorklistQuery.data ?? null,
+    chapterWorklistLoading: currentChapterWorklistQuery.isLoading,
+    chapterWorklistError:
+      currentChapterWorklistQuery.error instanceof Error
+        ? currentChapterWorklistQuery.error.message
+        : null,
     currentChapterReviewDetail: currentChapterReviewQuery.data ?? null,
     currentChapterReviewLoading: currentChapterReviewQuery.isLoading,
     currentChapterReviewError:
@@ -378,6 +565,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     uploadPending: uploadMutation.isPending,
     runActionPending: runActionMutation.isPending,
     reviewDecisionPending: reviewDecisionMutation.isPending,
+    assignmentPending: assignmentMutation.isPending,
+    actionExecutionPending: actionExecutionMutation.isPending,
     uploadFile: uploadMutation.mutateAsync,
     runPrimaryAction: runActionMutation.mutateAsync,
     refreshCurrentDocument,
@@ -385,6 +574,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       reviewDecisionMutation.mutateAsync({ proposalId, decision: "approved", payload }),
     rejectMemoryProposal: (proposalId, payload) =>
       reviewDecisionMutation.mutateAsync({ proposalId, decision: "rejected", payload }),
+    assignChapterOwner: (chapterId, payload) =>
+      assignmentMutation
+        .mutateAsync({ chapterId, mode: "assign", payload })
+        .then((result) => result as ChapterWorklistAssignment),
+    clearChapterAssignment: (chapterId, payload) =>
+      assignmentMutation
+        .mutateAsync({ chapterId, mode: "clear", payload })
+        .then((result) => result as ChapterWorklistAssignmentClearResponse),
+    executeChapterAction: (actionId, runFollowup = true) =>
+      actionExecutionMutation.mutateAsync({ actionId, runFollowup }),
     downloadAsset,
     downloadChapterAsset,
   };

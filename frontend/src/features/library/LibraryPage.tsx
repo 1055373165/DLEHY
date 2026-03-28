@@ -56,9 +56,9 @@ export function LibraryPage() {
   return (
     <div className={styles.layout}>
       <Surface
-        eyebrow="Library"
-        title="书库"
-        description="只保留检索、回看和重新打开。历史书籍不再挤压主工作流。"
+        eyebrow="书库"
+        title="历史书籍"
+        description="只保留检索、回看和重新打开。"
         aside={
           historyQuery.data ? `共 ${historyQuery.data.total_count} 本，本页显示 ${historyQuery.data.record_count} 本` : null
         }

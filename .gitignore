@@ -10,6 +10,9 @@ __pycache__/
 venv/
 dist/
 build/
+frontend/node_modules/
+frontend/coverage/
+frontend/.vite/
 *.egg-info/
 htmlcov/
 .coverage

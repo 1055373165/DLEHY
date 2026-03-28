@@ -1,15 +1,14 @@
 .badge {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 7px 13px;
+  min-height: 30px;
+  padding: 0 10px;
   border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  font-size: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 10.5px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -27,18 +26,18 @@
 
 .warning {
   background: var(--warning-soft);
-  border-color: rgba(149, 103, 31, 0.22);
+  border-color: rgba(143, 106, 45, 0.18);
   color: var(--warning);
 }
 
 .danger {
   background: var(--danger-soft);
-  border-color: rgba(160, 70, 69, 0.22);
+  border-color: rgba(160, 79, 69, 0.18);
   color: var(--danger);
 }
 
 .muted {
-  background: rgba(86, 100, 114, 0.08);
-  border-color: rgba(86, 100, 114, 0.12);
+  background: rgba(93, 104, 118, 0.08);
+  border-color: rgba(93, 104, 118, 0.12);
   color: var(--surface-ink-soft);
 }

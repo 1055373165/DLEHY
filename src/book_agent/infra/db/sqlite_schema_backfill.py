@@ -28,6 +28,21 @@ def ensure_sqlite_schema_compat(database_url: str) -> int:
                 continue
             connection.execute(f'ALTER TABLE "documents" ADD COLUMN "{column_name}" TEXT')
             added_column_count += 1
+
+        for table_name in ("document_runs", "work_items", "run_budgets"):
+            if not _has_table(connection, table_name):
+                continue
+            table_columns = _table_columns(connection, table_name)
+            if "runtime_bundle_revision_id" not in table_columns:
+                connection.execute(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "runtime_bundle_revision_id" TEXT'
+                )
+                added_column_count += 1
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS "
+                f'"idx_{table_name}_runtime_bundle_revision" '
+                f'ON "{table_name}"("runtime_bundle_revision_id")'
+            )
         document_columns = _table_columns(connection, "documents")
 
         connection.execute(

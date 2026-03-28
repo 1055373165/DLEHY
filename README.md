@@ -30,9 +30,9 @@ Long-document translation agent for translating English books into high-quality 
 ## Current Runtime Notes
 
 - The runtime now exposes a user-facing translation studio at `/`, so the project no longer ships as API-only.
-- The homepage is intentionally served by FastAPI itself rather than a separate SPA, which keeps the product surface tightly aligned with the existing workflow, run-control, review, and export contracts.
-- The homepage is now organized around a user task flow: upload an English EPUB/PDF, start a `translate_full` run, watch progress, and download merged Chinese or bilingual exports when ready.
-- The same homepage also includes document history, recent run visibility, and direct export download actions, so previously processed books can be reopened without leaving the page.
+- The backend now serves `/v1` APIs plus a minimal service entry at `/`.
+- The user-facing workspace now lives in the standalone React/Vite frontend under [frontend](/Users/smy/project/book-agent/frontend).
+- The frontend is organized around four focused tabs: workbench, runs, deliverables, and library.
 - Advanced worklist / owner-assignment APIs remain available under `/v1`, but they are no longer the primary homepage experience.
 - Default translation backend is `echo`, which preserves the full persistence and QA path without calling an external model.
 - The runtime now exposes the same workflow through FastAPI and a local CLI.
@@ -153,8 +153,8 @@ book-agent --database-url sqlite+pysqlite:///./local.db execute-action --action-
 
 API notes:
 
-- `GET /` serves the user-facing translation studio homepage and links directly into the live API surfaces.
-- The same homepage now exposes upload, current document summary, run progress, export download, and history search on top of the existing `/v1` APIs.
+- `GET /` serves a minimal backend service entry with links to docs, OpenAPI, and health.
+- The standalone React/Vite frontend consumes the existing `/v1` APIs for upload, current document summary, run progress, export download, and history search.
 - Advanced operational APIs such as worklist, owner assignment, and run control remain directly available under `/v1`, even though the homepage now prioritizes the end-user upload-to-download flow.
 - `POST /v1/documents/{document_id}/export` accepts `{"auto_execute_followup_on_gate": true, "max_auto_followup_attempts": 3}` for opt-in export-time repair.
 - Successful auto-repaired exports return `auto_followup_requested`, `auto_followup_attempt_count`, `auto_followup_attempt_limit`, and `auto_followup_executions`.
@@ -208,8 +208,17 @@ Use the unified service script to manage the local runtime:
 Notes:
 
 - `start.sh` and `stop.sh` are still available as compatibility wrappers, but they now delegate to `./service.sh`.
-- The current Web UI is served directly by FastAPI, so there is no standalone frontend process by default.
-- If a separate frontend dev server is introduced later, set `BOOK_AGENT_FRONTEND_CMD` to let `./service.sh` manage it together with the backend.
+- The backend no longer serves the product workspace UI directly; `/` is now a minimal service entry.
+- If [frontend](/Users/smy/project/book-agent/frontend) exists, `./service.sh start` will now start both backend and frontend by default.
+- Frontend default URL: `http://127.0.0.1:4173`
+- To run backend-only, use `BOOK_AGENT_DISABLE_FRONTEND=1 ./service.sh start`
+- Optional overrides:
+  - `BOOK_AGENT_FRONTEND_PORT=4173`
+  - `BOOK_AGENT_FRONTEND_DIR=/Users/smy/project/book-agent/frontend`
+  - `BOOK_AGENT_FRONTEND_CMD=npm run dev -- --host 0.0.0.0 --port 4173`
+- Frontend environment:
+  - `VITE_API_BASE_URL` points at the backend API base, for example `/v1` behind a proxy or `http://127.0.0.1:8999/v1` for direct cross-origin development.
+  - `VITE_API_PROXY_TARGET` can override the Vite dev proxy target when local backend origin differs from the default.
 
 ## Docker
 

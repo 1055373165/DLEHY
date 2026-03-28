@@ -16,5 +16,6 @@ def get_session_factory(request: Request) -> sessionmaker:
 
 def get_db_session(request: Request) -> Iterator[Session]:
     session_factory = get_session_factory(request)
-    with session_scope(session_factory) as session:
+    commit_on_exit = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+    with session_scope(session_factory, commit_on_exit=commit_on_exit) as session:
         yield session

@@ -63,9 +63,9 @@ export function RunsPage() {
   return (
     <div className={styles.layout}>
       <Surface
-        eyebrow="Run Flow"
+        eyebrow="运行"
         title="运行总览"
-        description="所有决定都围绕当前 run 的阶段、状态和下一次可执行操作。"
+        description="围绕当前 run 的阶段、状态和下一次可执行操作。"
         aside={currentDocument ? <StatusBadge tone={badge.tone} label={badge.label} /> : null}
       >
         {currentRun && currentDocument ? (
@@ -172,9 +172,9 @@ export function RunsPage() {
       <div className={styles.splitGrid}>
         <div className={styles.listCard}>
           <div className={styles.listHeader}>
-            <h3 className={styles.listTitle}>最值得关注的章节</h3>
+            <h3 className={styles.listTitle}>重点章节</h3>
             <p className={styles.listCopy}>
-              只列最有行动价值的章节，优先看 open issue 多、已可直接导出的章节。
+              只列当前最有行动价值的章节。
             </p>
           </div>
           {focusChapters.length ? (
@@ -215,7 +215,7 @@ export function RunsPage() {
         <div className={styles.listCard}>
           <div className={styles.listHeader}>
             <h3 className={styles.listTitle}>最近事件</h3>
-            <p className={styles.listCopy}>用最近事件判断系统刚刚做了什么，而不是翻大量内部字段。</p>
+            <p className={styles.listCopy}>用最近事件判断系统刚刚完成了什么。</p>
           </div>
           {currentRunEvents.length ? (
             <div className={styles.eventList}>

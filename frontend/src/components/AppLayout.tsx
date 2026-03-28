@@ -41,10 +41,10 @@ export function AppLayout() {
       />
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <div className={styles.brandEyebrow}>Editorial Operations Desk</div>
+          <div className={styles.brandEyebrow}>整书译制工作台</div>
           <h1 className={styles.brandTitle}>Book Agent</h1>
           <p className={styles.brandCopy}>
-            把上传、运行、交付和回看拆成四个清晰界面，只保留真正影响判断与交付的内容。
+            上传、运行、复核、交付。
           </p>
         </div>
         <nav className={styles.nav} aria-label="Primary">
@@ -64,17 +64,18 @@ export function AppLayout() {
           ))}
         </nav>
         <div className={styles.sidebarFooter}>
-          <span>主导航只保留真实工作流。</span>
-          <span>系统能力收纳到右上角，避免打断操作视线。</span>
+          <span>只保留会影响操作判断的信息。</span>
         </div>
       </aside>
 
       <main className={styles.main}>
         <header className={styles.topbar}>
           <div className={styles.topbarMeta}>
-            <div className={styles.topbarEyebrow}>{activeItem.label}</div>
-            <h2 className={styles.topbarTitle}>{currentTitle}</h2>
-            <p className={styles.topbarCopy}>{currentNote}</p>
+            <div className={styles.topbarEyebrow}>当前页面</div>
+            <h2 className={styles.topbarTitle}>{activeItem.label}</h2>
+            <p className={styles.topbarCopy}>
+              {currentDocument ? `《${currentTitle}》 · ${currentNote}` : activeItem.hint}
+            </p>
           </div>
           <div className={styles.toolbar}>
             <button

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
@@ -15,6 +16,18 @@ from book_agent.infra.db.sqlite_schema_backfill import ensure_sqlite_schema_comp
 from book_agent.workers.factory import build_translation_worker
 
 
+def _database_error_detail(*, dialect_name: str, exc: OperationalError) -> str:
+    if dialect_name == "sqlite" and "database is locked" in str(exc).lower():
+        return (
+            "SQLite is busy with another write. Wait for the active run to finish or retry in a "
+            "moment, or switch to PostgreSQL for concurrent long-running work."
+        )
+    return (
+        "Database unavailable. Start PostgreSQL if you configured one, "
+        "or remove BOOK_AGENT_DATABASE_URL to use the local SQLite default."
+    )
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -24,6 +37,14 @@ def create_app() -> FastAPI:
         version=settings.app_version,
         description="Long-document translation agent focused on traceable book translation.",
     )
+    if settings.cors_allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allow_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     engine = build_engine(database_url=settings.database_url)
     if engine.dialect.name == "sqlite":
         Base.metadata.create_all(engine)
@@ -41,10 +62,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=503,
             content={
-                "detail": (
-                    "Database unavailable. Start PostgreSQL if you configured one, "
-                    "or remove BOOK_AGENT_DATABASE_URL to use the local SQLite default."
-                )
+                "detail": _database_error_detail(dialect_name=engine.dialect.name, exc=_exc)
             },
         )
 

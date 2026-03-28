@@ -280,6 +280,190 @@ export interface ChapterWorklistTimelineEntry {
   owner_name?: string | null;
 }
 
+export interface ChapterMemoryProposalQueueSummary {
+  proposal_count: number;
+  pending_proposal_count: number;
+  counts_by_status: Record<string, number>;
+  latest_proposal_updated_at?: string | null;
+  active_snapshot_version?: number | null;
+}
+
+export interface IssueChapterQueueEntry {
+  chapter_id: string;
+  ordinal: number;
+  title_src?: string | null;
+  chapter_status: string;
+  issue_count: number;
+  open_issue_count: number;
+  triaged_issue_count: number;
+  blocking_issue_count: number;
+  active_blocking_issue_count: number;
+  issue_family_count: number;
+  dominant_issue_type?: string | null;
+  dominant_root_cause_layer?: string | null;
+  dominant_issue_count: number;
+  latest_issue_at?: string | null;
+  heat_score: number;
+  heat_level: string;
+  queue_rank: number;
+  queue_priority: string;
+  queue_driver: string;
+  needs_immediate_attention: boolean;
+  oldest_active_issue_at?: string | null;
+  age_hours?: number | null;
+  age_bucket: string;
+  sla_target_hours?: number | null;
+  sla_status: string;
+  owner_ready: boolean;
+  owner_ready_reason: string;
+  is_assigned: boolean;
+  assigned_owner_name?: string | null;
+  assigned_at?: string | null;
+  latest_activity_bucket_start?: string | null;
+  latest_created_issue_count: number;
+  latest_resolved_issue_count: number;
+  latest_net_issue_delta: number;
+  regression_hint: string;
+  flapping_hint: boolean;
+  memory_proposals: ChapterMemoryProposalQueueSummary;
+}
+
+export interface ChapterOwnerWorkload {
+  owner_name: string;
+  assigned_chapter_count: number;
+  immediate_count: number;
+  high_count: number;
+  medium_count: number;
+  breached_count: number;
+  due_soon_count: number;
+  on_track_count: number;
+  owner_ready_count: number;
+  total_open_issue_count: number;
+  total_active_blocking_issue_count: number;
+  oldest_active_issue_at?: string | null;
+  latest_issue_at?: string | null;
+}
+
+export interface DocumentChapterWorklist {
+  document_id: string;
+  worklist_count: number;
+  filtered_worklist_count: number;
+  entry_count: number;
+  offset: number;
+  limit?: number | null;
+  has_more: boolean;
+  applied_queue_priority_filter?: string | null;
+  applied_sla_status_filter?: string | null;
+  applied_owner_ready_filter?: boolean | null;
+  applied_needs_immediate_attention_filter?: boolean | null;
+  applied_assigned_filter?: boolean | null;
+  applied_assigned_owner_filter?: string | null;
+  queue_priority_counts: Record<string, number>;
+  sla_status_counts: Record<string, number>;
+  immediate_attention_count: number;
+  owner_ready_count: number;
+  assigned_count: number;
+  owner_workload_summary: ChapterOwnerWorkload[];
+  owner_workload_highlights: Record<string, ChapterOwnerWorkload | null>;
+  highlights: Record<string, IssueChapterQueueEntry | null>;
+  entries: IssueChapterQueueEntry[];
+}
+
+export interface DocumentChapterWorklistFilters {
+  limit?: number;
+  offset?: number;
+  queuePriority?: "immediate" | "high" | "medium";
+  assigned?: boolean;
+  ownerReady?: boolean;
+  assignedOwnerName?: string;
+}
+
+export interface ChapterWorklistAssignment {
+  assignment_id: string;
+  document_id: string;
+  chapter_id: string;
+  owner_name: string;
+  assigned_by: string;
+  note?: string | null;
+  assigned_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChapterWorklistAssignmentRequest {
+  owner_name: string;
+  assigned_by: string;
+  note?: string;
+}
+
+export interface ChapterWorklistAssignmentClearRequest {
+  cleared_by: string;
+  note?: string;
+}
+
+export interface ChapterWorklistAssignmentClearResponse {
+  document_id: string;
+  chapter_id: string;
+  cleared: boolean;
+  cleared_by: string;
+  note?: string | null;
+  cleared_assignment_id: string;
+}
+
+export interface ChapterWorklistIssue {
+  issue_id: string;
+  issue_type: string;
+  root_cause_layer: string;
+  severity: string;
+  status: string;
+  blocking: boolean;
+  detector: string;
+  suggested_action?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChapterWorklistAction {
+  action_id: string;
+  issue_id: string;
+  issue_type: string;
+  action_type: string;
+  scope_type: string;
+  scope_id?: string | null;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExecuteActionResponse {
+  action_id: string;
+  status: string;
+  invalidation_count: number;
+  rerun_scope_type: string;
+  rerun_scope_ids: string[];
+  followup_executed: boolean;
+  rebuild_applied: boolean;
+  rebuilt_packet_ids: string[];
+  rebuilt_snapshot_ids: string[];
+  chapter_brief_version?: number | null;
+  termbase_version?: number | null;
+  entity_snapshot_version?: number | null;
+  rerun_packet_ids: string[];
+  rerun_translation_run_ids: string[];
+  issue_resolved?: boolean | null;
+  recheck_issue_count?: number | null;
+}
+
+export interface ChapterWorklistAssignmentHistoryEntry {
+  event_id: string;
+  event_type: string;
+  owner_name?: string | null;
+  performed_by?: string | null;
+  note?: string | null;
+  created_at: string;
+}
+
 export interface DocumentChapterWorklistDetail {
   document_id: string;
   chapter_id: string;
@@ -292,6 +476,11 @@ export interface DocumentChapterWorklistDetail {
   current_open_issue_count: number;
   current_triaged_issue_count: number;
   current_active_blocking_issue_count: number;
+  assignment?: ChapterWorklistAssignment | null;
+  queue_entry?: IssueChapterQueueEntry | null;
+  recent_issues: ChapterWorklistIssue[];
+  recent_actions: ChapterWorklistAction[];
+  assignment_history: ChapterWorklistAssignmentHistoryEntry[];
   memory_proposals: ChapterMemoryProposalSurface;
   timeline: ChapterWorklistTimelineEntry[];
 }
@@ -430,6 +619,81 @@ export async function getDocumentChapterWorklistDetail(
 ): Promise<DocumentChapterWorklistDetail> {
   return requestJson<DocumentChapterWorklistDetail>(
     `/documents/${encodeURIComponent(documentId)}/chapters/${encodeURIComponent(chapterId)}/worklist`
+  );
+}
+
+export async function getDocumentChapterWorklist(
+  documentId: string,
+  filters: DocumentChapterWorklistFilters = {}
+): Promise<DocumentChapterWorklist> {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 50));
+  params.set("offset", String(filters.offset ?? 0));
+  if (filters.queuePriority) {
+    params.set("queue_priority", filters.queuePriority);
+  }
+  if (filters.assigned !== undefined) {
+    params.set("assigned", String(filters.assigned));
+  }
+  if (filters.ownerReady !== undefined) {
+    params.set("owner_ready", String(filters.ownerReady));
+  }
+  if (filters.assignedOwnerName) {
+    params.set("assigned_owner_name", filters.assignedOwnerName);
+  }
+  return requestJson<DocumentChapterWorklist>(
+    `/documents/${encodeURIComponent(documentId)}/chapters/worklist?${params.toString()}`
+  );
+}
+
+export async function assignDocumentChapterWorklistOwner(
+  documentId: string,
+  chapterId: string,
+  payload: ChapterWorklistAssignmentRequest
+): Promise<ChapterWorklistAssignment> {
+  return requestJson<ChapterWorklistAssignment>(
+    `/documents/${encodeURIComponent(documentId)}/chapters/${encodeURIComponent(chapterId)}/worklist/assignment`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function clearDocumentChapterWorklistAssignment(
+  documentId: string,
+  chapterId: string,
+  payload: ChapterWorklistAssignmentClearRequest
+): Promise<ChapterWorklistAssignmentClearResponse> {
+  return requestJson<ChapterWorklistAssignmentClearResponse>(
+    `/documents/${encodeURIComponent(documentId)}/chapters/${encodeURIComponent(chapterId)}/worklist/assignment/clear`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function executeIssueAction(
+  actionId: string,
+  options: { runFollowup?: boolean } = {}
+): Promise<ExecuteActionResponse> {
+  const params = new URLSearchParams();
+  if (options.runFollowup) {
+    params.set("run_followup", "true");
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<ExecuteActionResponse>(
+    `/actions/${encodeURIComponent(actionId)}/execute${suffix}`,
+    {
+      method: "POST",
+    }
   );
 }
 

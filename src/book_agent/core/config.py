@@ -1,9 +1,10 @@
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     export_root: Path = Path("artifacts/exports")
     runtime_bundle_root: Path = Path("artifacts/runtime-bundles")
     upload_root: Path = Path("artifacts/uploads")
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     translation_backend: str = "echo"
     translation_model: str = "echo-worker"
     translation_prompt_version: str = "p0.echo.v1"
@@ -81,6 +83,24 @@ class Settings(BaseSettings):
             dotenv_settings,
             file_secret_settings,
         )
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _parse_cors_allow_origins(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in text.split(",") if item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raise TypeError("cors_allow_origins must be a list or comma-separated string")
 
 
 @lru_cache(maxsize=1)
