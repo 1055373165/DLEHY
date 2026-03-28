@@ -39,12 +39,19 @@ type TimelineFocusTarget =
       label: string;
       helper: string;
     };
+type OperatorConvergenceSnapshot = {
+  pendingProposalCount: number;
+  activeSnapshotVersion: number | null;
+  ownerName: string;
+  actionStatus: string;
+};
 type RecentOperatorChange = {
   chapterId: string;
   kind: "proposal" | "assignment" | "action";
   title: string;
   body: string;
   highlights: string[];
+  before: OperatorConvergenceSnapshot | null;
 };
 
 export function WorkspacePage() {
@@ -110,6 +117,14 @@ export function WorkspacePage() {
   const timelineGroups = groupTimelineEntries(currentChapterReviewDetail?.timeline ?? []);
   const selectedChapterRecentChange =
     recentOperatorChange?.chapterId === selectedReviewChapterId ? recentOperatorChange : null;
+  const selectedChapterCurrentSnapshot = buildOperatorSnapshot(
+    selectedQueueEntry,
+    currentChapterReviewDetail
+  );
+  const selectedChapterConvergenceItems =
+    selectedChapterRecentChange && selectedChapterCurrentSnapshot
+      ? buildConvergenceItems(selectedChapterRecentChange.before, selectedChapterCurrentSnapshot)
+      : [];
   const focusedActionEntry =
     timelineFocus?.section === "actions"
       ? currentChapterReviewDetail?.recent_actions.find(
@@ -176,6 +191,7 @@ export function WorkspacePage() {
       setReviewMessage({ tone: "error", text: "请先选择一个章节。" });
       return;
     }
+    const beforeSnapshot = buildOperatorSnapshot(selectedQueueEntry, currentChapterReviewDetail);
     try {
       const payload = {
         actor_name: reviewerName.trim() || undefined,
@@ -207,6 +223,7 @@ export function WorkspacePage() {
                 `Snapshot v${result.committed_snapshot_version ?? "—"}`,
               ]
             : [`Proposal ${shorten(result.proposal.proposal_id, 5)}`, "等待新 proposal"],
+        before: beforeSnapshot,
       });
       setReviewerNote("");
     } catch (error) {
@@ -226,6 +243,7 @@ export function WorkspacePage() {
       setReviewMessage({ tone: "error", text: "请先填写要分派的处理人。" });
       return;
     }
+    const beforeSnapshot = buildOperatorSnapshot(selectedQueueEntry, currentChapterReviewDetail);
     try {
       if (mode === "assign") {
         const assignment = await assignChapterOwner(selectedReviewChapterId, {
@@ -243,6 +261,7 @@ export function WorkspacePage() {
           title: "章节 assignment 已更新",
           body: "队列所有权已经切到新的 operator，后续 follow-up 和 override 会沿着这条 ownership 链继续推进。",
           highlights: [assignment.owner_name, `By ${assignment.assigned_by}`],
+          before: beforeSnapshot,
         });
       } else {
         await clearChapterAssignment(selectedReviewChapterId, {
@@ -259,6 +278,7 @@ export function WorkspacePage() {
           title: "章节已回收至共享队列",
           body: "这章不再绑定单一 owner，当前队列里的其他 operator 都可以继续接手。",
           highlights: ["共享队列", `By ${reviewerName.trim() || "reviewer-ui"}`],
+          before: beforeSnapshot,
         });
         setAssignmentOwner("");
       }
@@ -276,6 +296,7 @@ export function WorkspacePage() {
       setReviewMessage({ tone: "error", text: "请先选择一个章节。" });
       return;
     }
+    const beforeSnapshot = buildOperatorSnapshot(selectedQueueEntry, currentChapterReviewDetail);
     try {
       const result = await executeChapterAction(actionId, true);
       setLastActionExecution({
@@ -305,6 +326,7 @@ export function WorkspacePage() {
           result.followup_executed ? "已触发 rerun" : "未触发 rerun",
           result.issue_resolved ? "issue 已收敛" : `复检 ${formatNumber(result.recheck_issue_count ?? 0)}`,
         ],
+        before: beforeSnapshot,
       });
     } catch (error) {
       setReviewMessage({
@@ -680,6 +702,16 @@ export function WorkspacePage() {
                             <span>Blockers {formatNumber(entry.active_blocking_issue_count)}</span>
                             <span>Pending {formatNumber(entry.memory_proposals.pending_proposal_count)}</span>
                           </div>
+                          {recentOperatorChange?.chapterId === entry.chapter_id &&
+                          selectedReviewChapterId === entry.chapter_id &&
+                          selectedChapterConvergenceItems.length ? (
+                            <p className={styles.queueDeltaHint}>
+                              {selectedChapterConvergenceItems
+                                .slice(0, 2)
+                                .map((item) => item.value)
+                                .join(" · ")}
+                            </p>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -880,6 +912,16 @@ export function WorkspacePage() {
                         </span>
                       ))}
                     </div>
+                    {selectedChapterConvergenceItems.length ? (
+                      <div className={styles.deltaGrid}>
+                        {selectedChapterConvergenceItems.map((item) => (
+                          <div key={item.label} className={styles.deltaCard}>
+                            <span className={styles.deltaLabel}>{item.label}</span>
+                            <strong className={styles.deltaValue}>{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1367,4 +1409,71 @@ function buildTimelineFocus(entry: ChapterWorklistTimelineEntry): TimelineFocusT
     label: `Follow-up Action · ${entry.action_type || entry.issue_type || shorten(entry.event_id, 5)}`,
     helper: "已把焦点切到 Recent Actions，可以直接执行 follow-up 或核对最近一次执行结果。",
   };
+}
+
+function buildOperatorSnapshot(
+  queueEntry:
+    | {
+        memory_proposals?: { pending_proposal_count?: number; active_snapshot_version?: number | null };
+        assigned_owner_name?: string | null;
+      }
+    | null,
+  detail:
+    | {
+        memory_proposals: { pending_proposal_count: number; active_snapshot_version?: number | null };
+        assignment?: { owner_name?: string | null } | null;
+        recent_actions: Array<{ status: string }>;
+      }
+    | null
+) {
+  if (!queueEntry && !detail) {
+    return null;
+  }
+  return {
+    pendingProposalCount:
+      detail?.memory_proposals.pending_proposal_count ??
+      queueEntry?.memory_proposals?.pending_proposal_count ??
+      0,
+    activeSnapshotVersion:
+      detail?.memory_proposals.active_snapshot_version ??
+      queueEntry?.memory_proposals?.active_snapshot_version ??
+      null,
+    ownerName: detail?.assignment?.owner_name ?? queueEntry?.assigned_owner_name ?? "共享队列",
+    actionStatus: detail?.recent_actions[0]?.status ?? "unknown",
+  } satisfies OperatorConvergenceSnapshot;
+}
+
+function buildConvergenceItems(
+  before: OperatorConvergenceSnapshot | null,
+  after: OperatorConvergenceSnapshot | null
+) {
+  if (!before || !after) {
+    return [];
+  }
+  const items: Array<{ label: string; value: string }> = [];
+  if (before.pendingProposalCount !== after.pendingProposalCount) {
+    items.push({
+      label: "Pending",
+      value: `Pending ${before.pendingProposalCount} -> ${after.pendingProposalCount}`,
+    });
+  }
+  if (before.activeSnapshotVersion !== after.activeSnapshotVersion) {
+    items.push({
+      label: "Snapshot",
+      value: `Snapshot v${before.activeSnapshotVersion ?? "—"} -> v${after.activeSnapshotVersion ?? "—"}`,
+    });
+  }
+  if (before.ownerName !== after.ownerName) {
+    items.push({
+      label: "Owner",
+      value: `Owner ${before.ownerName} -> ${after.ownerName}`,
+    });
+  }
+  if (before.actionStatus !== after.actionStatus) {
+    items.push({
+      label: "Action",
+      value: `Action ${before.actionStatus} -> ${after.actionStatus}`,
+    });
+  }
+  return items;
 }

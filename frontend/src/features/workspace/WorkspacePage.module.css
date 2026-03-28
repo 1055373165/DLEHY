@@ -360,6 +360,8 @@
 .ownerSnapshotGrid,
 .ownerSnapshotCard,
 .changeCard,
+.deltaGrid,
+.deltaCard,
 .focusTitle {
   gap: 10px;
 }
@@ -657,6 +659,31 @@
   background: color-mix(in srgb, var(--surface-strong) 82%, white);
 }
 
+.deltaGrid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.deltaCard {
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: var(--surface-strong);
+}
+
+.deltaLabel {
+  color: var(--surface-ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.deltaValue {
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .queueRankRow {
   display: flex;
   flex-wrap: wrap;
@@ -746,6 +773,14 @@
   color: var(--surface-ink-soft);
   font-size: 12px;
   font-weight: 600;
+}
+
+.queueDeltaHint {
+  margin: 0;
+  color: var(--surface-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
 }
 
 .assignmentBar {
