@@ -31,6 +31,7 @@ from book_agent.schemas.workflow import (
     ChapterWorklistAssignmentClearResponse,
     ChapterWorklistAssignmentRequest,
     ChapterWorklistAssignmentResponse,
+    ChapterWorklistTimelineEntryResponse,
     DocumentChapterWorklistResponse,
     DocumentChapterWorklistDetailResponse,
     DocumentHistoryBackfillResponse,
@@ -54,6 +55,7 @@ from book_agent.services.workflows import (
     ChapterMemoryProposalDecisionResult,
     ChapterMemoryProposalDecisionAuditSummary,
     ChapterMemoryProposalSummary,
+    ChapterWorklistTimelineEntry,
     DocumentExportResult,
     DocumentReviewResult,
     DocumentSummary,
@@ -743,6 +745,29 @@ def _to_chapter_memory_proposal_decision_audit_response(
     )
 
 
+def _to_chapter_worklist_timeline_entry_response(
+    entry: ChapterWorklistTimelineEntry,
+) -> ChapterWorklistTimelineEntryResponse:
+    return ChapterWorklistTimelineEntryResponse(
+        event_id=entry.event_id,
+        source_kind=entry.source_kind,
+        event_kind=entry.event_kind,
+        created_at=entry.created_at,
+        actor_name=entry.actor_name,
+        note=entry.note,
+        issue_id=entry.issue_id,
+        issue_type=entry.issue_type,
+        action_id=entry.action_id,
+        action_type=entry.action_type,
+        scope_type=entry.scope_type,
+        scope_id=entry.scope_id,
+        status=entry.status,
+        proposal_id=entry.proposal_id,
+        decision=entry.decision,
+        owner_name=entry.owner_name,
+    )
+
+
 def _to_chapter_memory_proposal_list_response(
     *,
     document_id: str,
@@ -1142,6 +1167,10 @@ def _to_chapter_worklist_detail_response(
                 for audit in result.memory_proposals.recent_decisions
             ],
         ),
+        timeline=[
+            _to_chapter_worklist_timeline_entry_response(entry)
+            for entry in result.timeline
+        ],
     )
 
 

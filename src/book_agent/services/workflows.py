@@ -751,6 +751,26 @@ class ChapterWorklistAssignmentHistoryEntry:
 
 
 @dataclass(slots=True)
+class ChapterWorklistTimelineEntry:
+    event_id: str
+    source_kind: str
+    event_kind: str
+    created_at: str
+    actor_name: str | None = None
+    note: str | None = None
+    issue_id: str | None = None
+    issue_type: str | None = None
+    action_id: str | None = None
+    action_type: str | None = None
+    scope_type: str | None = None
+    scope_id: str | None = None
+    status: str | None = None
+    proposal_id: str | None = None
+    decision: str | None = None
+    owner_name: str | None = None
+
+
+@dataclass(slots=True)
 class DocumentChapterWorklistDetail:
     document_id: str
     chapter_id: str
@@ -771,6 +791,7 @@ class DocumentChapterWorklistDetail:
     recent_actions: list[ChapterWorklistAction]
     assignment_history: list[ChapterWorklistAssignmentHistoryEntry]
     memory_proposals: ChapterMemoryProposalSurface
+    timeline: list[ChapterWorklistTimelineEntry]
 
 
 @dataclass(slots=True)
@@ -2828,6 +2849,8 @@ class DocumentWorkflowService:
             document_id=document_id,
             chapter_id=chapter_id,
         )
+        recent_actions = self._to_chapter_recent_actions(chapter_id)
+        assignment_history = self._to_chapter_assignment_history(chapter_id)
 
         return DocumentChapterWorklistDetail(
             document_id=document_id,
@@ -2852,9 +2875,14 @@ class DocumentWorkflowService:
             quality_summary=self._to_stored_quality_summary(quality_summary),
             issue_family_breakdown=issue_family_breakdown,
             recent_issues=self._to_chapter_recent_issues(chapter_id),
-            recent_actions=self._to_chapter_recent_actions(chapter_id),
-            assignment_history=self._to_chapter_assignment_history(chapter_id),
+            recent_actions=recent_actions,
+            assignment_history=assignment_history,
             memory_proposals=memory_proposals,
+            timeline=self._to_chapter_worklist_timeline(
+                recent_actions=recent_actions,
+                assignment_history=assignment_history,
+                memory_decisions=memory_proposals.recent_decisions,
+            ),
         )
 
     def assign_document_chapter_worklist_owner(
@@ -3058,6 +3086,66 @@ class DocumentWorkflowService:
             )
             for event in events
         ]
+
+    def _to_chapter_worklist_timeline(
+        self,
+        *,
+        recent_actions: list[ChapterWorklistAction],
+        assignment_history: list[ChapterWorklistAssignmentHistoryEntry],
+        memory_decisions: list[ChapterMemoryProposalDecisionAuditSummary],
+        limit: int = 20,
+    ) -> list[ChapterWorklistTimelineEntry]:
+        timeline: list[ChapterWorklistTimelineEntry] = [
+            ChapterWorklistTimelineEntry(
+                event_id=action.action_id,
+                source_kind="action",
+                event_kind="issue_action",
+                created_at=action.updated_at,
+                actor_name=action.created_by,
+                issue_id=action.issue_id,
+                issue_type=action.issue_type,
+                action_id=action.action_id,
+                action_type=action.action_type,
+                scope_type=action.scope_type,
+                scope_id=action.scope_id,
+                status=action.status,
+            )
+            for action in recent_actions
+        ]
+        timeline.extend(
+            ChapterWorklistTimelineEntry(
+                event_id=event.event_id,
+                source_kind="assignment",
+                event_kind=event.event_type,
+                created_at=event.created_at,
+                actor_name=event.performed_by,
+                note=event.note,
+                owner_name=event.owner_name,
+            )
+            for event in assignment_history
+        )
+        timeline.extend(
+            ChapterWorklistTimelineEntry(
+                event_id=audit.proposal_id,
+                source_kind="memory_proposal",
+                event_kind=audit.decision,
+                created_at=audit.created_at,
+                actor_name=audit.actor_id,
+                note=audit.note,
+                proposal_id=audit.proposal_id,
+                decision=audit.decision,
+            )
+            for audit in memory_decisions
+        )
+        timeline.sort(key=lambda entry: self._timeline_sort_key(entry.created_at), reverse=True)
+        return timeline[:limit]
+
+    def _timeline_sort_key(self, value: str) -> datetime:
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
 
     def _to_export_record_summary(self, export) -> ExportRecordSummary:
         bundle = export.input_version_bundle_json or {}

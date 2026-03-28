@@ -534,6 +534,25 @@ class ChapterWorklistAssignmentHistoryEntryResponse(BaseSchema):
     created_at: str
 
 
+class ChapterWorklistTimelineEntryResponse(BaseSchema):
+    event_id: str
+    source_kind: str
+    event_kind: str
+    created_at: str
+    actor_name: str | None = None
+    note: str | None = None
+    issue_id: str | None = None
+    issue_type: str | None = None
+    action_id: str | None = None
+    action_type: str | None = None
+    scope_type: str | None = None
+    scope_id: str | None = None
+    status: str | None = None
+    proposal_id: str | None = None
+    decision: Literal["approved", "rejected"] | None = None
+    owner_name: str | None = None
+
+
 class DocumentChapterWorklistDetailResponse(BaseSchema):
     document_id: str
     chapter_id: str
@@ -556,6 +575,7 @@ class DocumentChapterWorklistDetailResponse(BaseSchema):
         default_factory=list
     )
     memory_proposals: ChapterMemoryProposalSurfaceResponse
+    timeline: list[ChapterWorklistTimelineEntryResponse] = Field(default_factory=list)
 
 
 class IssueActivityTimelineEntryResponse(BaseSchema):

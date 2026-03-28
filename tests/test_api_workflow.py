@@ -969,6 +969,11 @@ class ApiWorkflowTests(unittest.TestCase):
         self.assertEqual(approved_surface["recent_decisions"][0]["decision"], "approved")
         self.assertEqual(approved_surface["recent_decisions"][0]["actor_id"], "reviewer-bob")
         self.assertEqual(approved_surface["recent_decisions"][0]["note"], "Snapshot accepted")
+        timeline = detail_after_approve.json()["timeline"]
+        self.assertEqual(timeline[0]["source_kind"], "memory_proposal")
+        self.assertEqual(timeline[0]["event_kind"], "approved")
+        self.assertEqual(timeline[0]["actor_name"], "reviewer-bob")
+        self.assertEqual(timeline[0]["note"], "Snapshot accepted")
 
     def test_bootstrap_upload_accepts_epub_file(self) -> None:
         epub_path = self._write_epub()
@@ -3166,6 +3171,10 @@ class ApiWorkflowTests(unittest.TestCase):
         self.assertEqual(detail_payload["memory_proposals"]["pending_proposal_count"], 0)
         self.assertEqual(detail_payload["memory_proposals"]["counts_by_status"]["committed"], 3)
         self.assertGreaterEqual(int(detail_payload["memory_proposals"]["active_snapshot_version"] or 0), 3)
+        timeline_source_kinds = {entry["source_kind"] for entry in detail_payload["timeline"]}
+        self.assertIn("action", timeline_source_kinds)
+        self.assertIn("assignment", timeline_source_kinds)
+        self.assertEqual(detail_payload["timeline"][0]["event_kind"], "set")
 
         assigned_worklist = self.client.get(
             f"/v1/documents/{document_id}/chapters/worklist",
