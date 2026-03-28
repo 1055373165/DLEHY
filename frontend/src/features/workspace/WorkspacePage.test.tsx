@@ -743,12 +743,13 @@ describe("Workspace page", () => {
     });
     expect(screen.getAllByText(/第 2 章 · Chapter Two/).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: "处理下一章" }));
+    await user.click(screen.getByRole("button", { name: "切到下一章重点" }));
 
     await waitFor(() => {
       expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");
     });
     expect(screen.getByText("STYLE_DRIFT")).toBeInTheDocument();
+    expect(screen.getByText("Follow-up Action · REBUILD_CHAPTER_BRIEF")).toBeInTheDocument();
   });
 
   it("supports assignment set and clear from the chapter workbench", async () => {

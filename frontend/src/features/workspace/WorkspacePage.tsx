@@ -53,11 +53,23 @@ type RecentOperatorChange = {
   highlights: string[];
   before: OperatorConvergenceSnapshot | null;
 };
+type PendingChapterFocus = {
+  chapterId: string;
+  section: TimelineFocusTarget["section"];
+  label: string;
+  helper: string;
+};
 type RecommendedNextStep = {
   title: string;
   body: string;
   actionKind: "proposal" | "assignment" | "action" | null;
   actionLabel?: string;
+};
+type NextQueueRecommendation = {
+  title: string;
+  body: string;
+  actionLabel: string;
+  focus: PendingChapterFocus;
 };
 
 export function WorkspacePage() {
@@ -102,6 +114,7 @@ export function WorkspacePage() {
     createdAt: string;
   } | null>(null);
   const [timelineFocus, setTimelineFocus] = useState<TimelineFocusTarget | null>(null);
+  const [pendingChapterFocus, setPendingChapterFocus] = useState<PendingChapterFocus | null>(null);
   const [recentOperatorChange, setRecentOperatorChange] = useState<RecentOperatorChange | null>(null);
   const [reviewerName, setReviewerName] = useState("reviewer-ui");
   const [reviewerNote, setReviewerNote] = useState("");
@@ -127,6 +140,7 @@ export function WorkspacePage() {
     selectedQueueIndex >= 0 && selectedQueueIndex < queueEntries.length - 1
       ? queueEntries[selectedQueueIndex + 1]
       : null;
+  const nextQueueRecommendation = nextQueueEntry ? buildNextQueueRecommendation(nextQueueEntry) : null;
   const timelineGroups = groupTimelineEntries(currentChapterReviewDetail?.timeline ?? []);
   const selectedChapterRecentChange =
     recentOperatorChange?.chapterId === selectedReviewChapterId ? recentOperatorChange : null;
@@ -173,6 +187,14 @@ export function WorkspacePage() {
     setLastActionExecution(null);
     setTimelineFocus(null);
   }, [selectedReviewChapterId]);
+
+  useEffect(() => {
+    if (!pendingChapterFocus || pendingChapterFocus.chapterId !== selectedReviewChapterId || !currentChapterReviewDetail) {
+      return;
+    }
+    setTimelineFocus(buildPendingChapterFocusTarget(pendingChapterFocus, currentChapterReviewDetail));
+    setPendingChapterFocus(null);
+  }, [pendingChapterFocus, selectedReviewChapterId, currentChapterReviewDetail]);
 
   async function handleUpload() {
     if (!selectedFile) {
@@ -409,14 +431,15 @@ export function WorkspacePage() {
   }
 
   function handleAdvanceToNextChapter() {
-    if (!nextQueueEntry) {
+    if (!nextQueueEntry || !nextQueueRecommendation) {
       return;
     }
     setReviewMessage({
       tone: "success",
-      text: `已切到第 ${nextQueueEntry.ordinal} 章，继续处理 ${nextQueueEntry.title_src || `Chapter ${nextQueueEntry.ordinal}`}。`,
+      text: `已切到第 ${nextQueueEntry.ordinal} 章，优先处理 ${nextQueueRecommendation.title.replace("下一章先看", "").replace("下一章先清", "").trim()}。`,
     });
     setTimelineFocus(null);
+    setPendingChapterFocus(nextQueueRecommendation.focus);
     selectReviewChapter(nextQueueEntry.chapter_id);
   }
 
@@ -1027,24 +1050,22 @@ export function WorkspacePage() {
                             </button>
                           </div>
                         ) : null}
-                        {nextQueueEntry ? (
+                        {nextQueueEntry && nextQueueRecommendation ? (
                           <div className={styles.nextQueueCard}>
                             <div>
                               <span className={styles.deltaLabel}>Next in Queue</span>
                               <strong className={styles.deltaValue}>
                                 第 {nextQueueEntry.ordinal} 章 · {nextQueueEntry.title_src || `Chapter ${nextQueueEntry.ordinal}`}
                               </strong>
-                              <p className={styles.timelineDetail}>
-                                {nextQueueEntry.queue_driver} · SLA {slaStatusLabel(nextQueueEntry.sla_status)} · Pending{" "}
-                                {formatNumber(nextQueueEntry.memory_proposals.pending_proposal_count)}
-                              </p>
+                              <p className={styles.timelineDetail}>{nextQueueRecommendation.title}</p>
+                              <p className={styles.timelineDetail}>{nextQueueRecommendation.body}</p>
                             </div>
                             <button
                               className={styles.ghostButton}
                               type="button"
                               onClick={handleAdvanceToNextChapter}
                             >
-                              处理下一章
+                              {nextQueueRecommendation.actionLabel}
                             </button>
                           </div>
                         ) : null}
@@ -1702,4 +1723,104 @@ function buildRecentChangeNextStep(
         actionKind: "action",
         actionLabel: "切到 follow-up",
       };
+}
+
+function buildNextQueueRecommendation(entry: {
+  chapter_id: string;
+  ordinal: number;
+  title_src?: string | null;
+  active_blocking_issue_count: number;
+  open_issue_count: number;
+  dominant_issue_type?: string | null;
+  memory_proposals: { pending_proposal_count: number };
+  assigned_owner_name?: string | null;
+  queue_driver?: string | null;
+}) {
+  const chapterLabel = `第 ${entry.ordinal} 章 · ${entry.title_src || `Chapter ${entry.ordinal}`}`;
+  if (entry.active_blocking_issue_count > 0) {
+    return {
+      title: "下一章先看 blocker / follow-up",
+      body: `${chapterLabel} 当前有 ${entry.active_blocking_issue_count} 个 blocker，优先核对 follow-up action 和 issue family。`,
+      actionLabel: "切到下一章 blocker",
+      focus: {
+        chapterId: entry.chapter_id,
+        section: "actions",
+        label: `Follow-up Action · ${entry.dominant_issue_type || chapterLabel}`,
+        helper: "已把焦点切到下一章的 follow-up action，优先处理最紧的 blocker。",
+      },
+    } satisfies NextQueueRecommendation;
+  }
+  if (entry.memory_proposals.pending_proposal_count > 0) {
+    return {
+      title: "下一章先清 pending proposal",
+      body: `${chapterLabel} 还有 ${entry.memory_proposals.pending_proposal_count} 条待审批 proposal，优先把 memory override 收敛。`,
+      actionLabel: "切到下一章 proposal",
+      focus: {
+        chapterId: entry.chapter_id,
+        section: "proposal",
+        label: `Memory Override · ${chapterLabel}`,
+        helper: "已把焦点切到下一章的 proposal 区，可以继续做 approve / reject。",
+      },
+    } satisfies NextQueueRecommendation;
+  }
+  if (entry.open_issue_count > 0) {
+    return {
+      title: "下一章先看 follow-up action",
+      body: `${chapterLabel} 仍有 ${entry.open_issue_count} 个 open issues，优先检查 action 和 rerun 收敛情况。`,
+      actionLabel: "切到下一章重点",
+      focus: {
+        chapterId: entry.chapter_id,
+        section: "actions",
+        label: `Follow-up Action · ${chapterLabel}`,
+        helper: "已把焦点切到下一章的 follow-up action，可以直接核对当前最关键的问题链。",
+      },
+    } satisfies NextQueueRecommendation;
+  }
+  return {
+    title: "下一章先确认 owner / queue 状态",
+    body: `${chapterLabel} 当前由 ${entry.assigned_owner_name || "共享队列"} 承接，可以先确认 owner handoff 是否还需要调整。`,
+    actionLabel: "切到下一章 owner",
+    focus: {
+      chapterId: entry.chapter_id,
+      section: "assignment",
+      label: `Assignment · ${entry.assigned_owner_name || "共享队列"}`,
+      helper: "已把焦点切到下一章的 assignment 控制区，可以继续分派或回收。",
+    },
+  } satisfies NextQueueRecommendation;
+}
+
+function buildPendingChapterFocusTarget(
+  pending: PendingChapterFocus,
+  detail: {
+    recent_actions: Array<{ action_id: string; action_type?: string | null; issue_type?: string | null }>;
+    memory_proposals: { pending_proposals: Array<{ proposal_id: string }> };
+    assignment?: { owner_name?: string | null } | null;
+  }
+): TimelineFocusTarget {
+  if (pending.section === "actions") {
+    const actionEntry = detail.recent_actions[0];
+    return {
+      eventId: `next-chapter-focus-${pending.chapterId}-actions`,
+      section: "actions",
+      actionId: actionEntry?.action_id ?? null,
+      label: `Follow-up Action · ${actionEntry?.action_type || actionEntry?.issue_type || pending.label}`,
+      helper: pending.helper,
+    };
+  }
+  if (pending.section === "proposal") {
+    const proposal = detail.memory_proposals.pending_proposals[0];
+    return {
+      eventId: `next-chapter-focus-${pending.chapterId}-proposal`,
+      section: "proposal",
+      proposalId: proposal?.proposal_id ?? null,
+      label: `Memory Override · ${shorten(proposal?.proposal_id ?? pending.chapterId, 5)}`,
+      helper: pending.helper,
+    };
+  }
+  return {
+    eventId: `next-chapter-focus-${pending.chapterId}-assignment`,
+    section: "assignment",
+    label: `Assignment · ${detail.assignment?.owner_name || "共享队列"}`,
+    helper: pending.helper,
+  };
 }
