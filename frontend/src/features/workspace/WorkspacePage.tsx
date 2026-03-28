@@ -125,6 +125,12 @@ export function WorkspacePage() {
     selectedChapterRecentChange && selectedChapterCurrentSnapshot
       ? buildConvergenceItems(selectedChapterRecentChange.before, selectedChapterCurrentSnapshot)
       : [];
+  const selectedChapterImpactedTimelineEventId =
+    selectedChapterRecentChange && currentChapterReviewDetail
+      ? currentChapterReviewDetail.timeline.find((entry) =>
+          timelineEntryMatchesRecentChange(entry, selectedChapterRecentChange)
+        )?.event_id ?? null
+      : null;
   const focusedActionEntry =
     timelineFocus?.section === "actions"
       ? currentChapterReviewDetail?.recent_actions.find(
@@ -686,7 +692,12 @@ export function WorkspacePage() {
                             <div className={styles.queueRankRow}>
                               <span className={styles.queueRank}>#{entry.queue_rank}</span>
                               {recentOperatorChange?.chapterId === entry.chapter_id ? (
-                                <span className={styles.changeBadge}>最新操作</span>
+                                <>
+                                  <span className={styles.changeBadge}>最新操作</span>
+                                  <span className={styles.changeKindBadge}>
+                                    {recentChangeKindLabel(recentOperatorChange.kind)}
+                                  </span>
+                                </>
                               ) : null}
                             </div>
                             <span className={styles.queuePriority}>{queuePriorityLabel(entry.queue_priority)}</span>
@@ -1196,26 +1207,34 @@ export function WorkspacePage() {
                                   </span>
                                 </div>
                                 <div className={styles.timelineList}>
-                                  {group.entries.map((entry) => (
-                                    <button
-                                      key={`${entry.source_kind}-${entry.event_id}-${entry.created_at}`}
-                                      className={`${styles.timelineCard} ${styles.timelineEventButton} ${
-                                        timelineFocus?.eventId === entry.event_id ? styles.timelineCardActive : ""
-                                      }`}
-                                      type="button"
-                                      aria-label={`聚焦 ${timelineHeadline(entry)}`}
-                                      aria-pressed={timelineFocus?.eventId === entry.event_id}
-                                      onClick={() => setTimelineFocus(buildTimelineFocus(entry))}
-                                    >
-                                      <div className={styles.timelineTop}>
-                                        <span className={styles.timelineTag}>{timelineLabel(entry)}</span>
-                                        <span className={styles.timelineDate}>{formatDate(entry.created_at)}</span>
-                                      </div>
-                                      <h4 className={styles.timelineTitle}>{timelineHeadline(entry)}</h4>
-                                      <p className={styles.timelineDetail}>{timelineDetail(entry)}</p>
-                                      {entry.note ? <p className={styles.timelineNote}>备注：{entry.note}</p> : null}
-                                    </button>
-                                  ))}
+                                  {group.entries.map((entry) => {
+                                    const impacted = selectedChapterImpactedTimelineEventId === entry.event_id;
+                                    return (
+                                      <button
+                                        key={`${entry.source_kind}-${entry.event_id}-${entry.created_at}`}
+                                        className={`${styles.timelineCard} ${styles.timelineEventButton} ${
+                                          timelineFocus?.eventId === entry.event_id ? styles.timelineCardActive : ""
+                                        } ${impacted ? styles.timelineCardRecentChange : ""}`}
+                                        type="button"
+                                        aria-label={`聚焦 ${timelineHeadline(entry)}`}
+                                        aria-pressed={timelineFocus?.eventId === entry.event_id}
+                                        onClick={() => setTimelineFocus(buildTimelineFocus(entry))}
+                                      >
+                                        <div className={styles.timelineTop}>
+                                          <span className={styles.timelineTag}>{timelineLabel(entry)}</span>
+                                          <div className={styles.timelineTopMeta}>
+                                            {impacted ? (
+                                              <span className={styles.timelineImpactBadge}>已影响当前状态</span>
+                                            ) : null}
+                                            <span className={styles.timelineDate}>{formatDate(entry.created_at)}</span>
+                                          </div>
+                                        </div>
+                                        <h4 className={styles.timelineTitle}>{timelineHeadline(entry)}</h4>
+                                        <p className={styles.timelineDetail}>{timelineDetail(entry)}</p>
+                                        {entry.note ? <p className={styles.timelineNote}>备注：{entry.note}</p> : null}
+                                      </button>
+                                    );
+                                  })}
                                 </div>
                               </section>
                             ))}
@@ -1476,4 +1495,27 @@ function buildConvergenceItems(
     });
   }
   return items;
+}
+
+function recentChangeKindLabel(kind: RecentOperatorChange["kind"]) {
+  if (kind === "proposal") {
+    return "Proposal 回写";
+  }
+  if (kind === "assignment") {
+    return "Assignment 回写";
+  }
+  return "Action 回写";
+}
+
+function timelineEntryMatchesRecentChange(
+  entry: ChapterWorklistTimelineEntry,
+  change: RecentOperatorChange
+) {
+  if (change.kind === "proposal") {
+    return entry.source_kind === "memory_proposal";
+  }
+  if (change.kind === "assignment") {
+    return entry.source_kind === "assignment";
+  }
+  return entry.source_kind === "action";
 }

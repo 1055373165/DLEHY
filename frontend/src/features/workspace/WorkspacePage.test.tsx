@@ -713,6 +713,8 @@ describe("Workspace page", () => {
     expect(screen.getByText("Pending 1 -> 0")).toBeInTheDocument();
     expect(screen.getByText("Snapshot v3 -> v4")).toBeInTheDocument();
     expect(screen.getAllByText("最新操作").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Proposal 回写").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已影响当前状态").length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/v1/documents/doc-123/chapters/ch-1/memory-proposals/prop-123/approve"),
       expect.objectContaining({ method: "POST" })
@@ -745,6 +747,7 @@ describe("Workspace page", () => {
     });
     expect(screen.getByText("章节 assignment 已更新")).toBeInTheDocument();
     expect(screen.getAllByText("Owner 共享队列 -> queue-owner").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Assignment 回写").length).toBeGreaterThan(0);
     expect(screen.getAllByText("queue-owner").length).toBeGreaterThan(0);
 
     await user.click(await screen.findByRole("button", { name: "聚焦 章节已分派给 queue-owner" }));
@@ -811,6 +814,8 @@ describe("Workspace page", () => {
     expect(screen.getByText("已收敛")).toBeInTheDocument();
     expect(screen.getAllByText("Action queued -> completed").length).toBeGreaterThan(0);
     expect(screen.getAllByText("最新操作").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Action 回写").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已影响当前状态").length).toBeGreaterThan(0);
     expect(screen.getAllByText("状态 completed").length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/v1/actions/act-ch-1/execute?run_followup=true"),
