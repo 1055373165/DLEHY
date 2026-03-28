@@ -364,6 +364,7 @@
 .deltaCard,
 .nextStepCard,
 .nextStepActions,
+.nextQueueCard,
 .focusTitle {
   gap: 10px;
 }
@@ -698,6 +699,17 @@
   justify-content: flex-start;
 }
 
+.nextQueueCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: var(--surface-strong);
+}
+
 .deltaLabel {
   color: var(--surface-ink-faint);
   font-size: 11px;
@@ -905,6 +917,10 @@
 
   .focusActions {
     justify-content: stretch;
+  }
+
+  .nextQueueCard {
+    grid-template-columns: 1fr;
   }
 }
 

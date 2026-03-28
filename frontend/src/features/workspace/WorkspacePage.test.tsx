@@ -715,6 +715,7 @@ describe("Workspace page", () => {
     expect(screen.getByText("转入 blocker / follow-up 处理")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "切到 follow-up" }));
     expect(screen.getByText("Follow-up Action · REBUILD_PACKET_THEN_RERUN")).toBeInTheDocument();
+    expect(screen.getAllByText(/第 2 章 · Chapter Two/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("最新操作").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Proposal 回写").length).toBeGreaterThan(0);
     expect(screen.getAllByText("已影响当前状态").length).toBeGreaterThan(0);
@@ -722,6 +723,32 @@ describe("Workspace page", () => {
       expect.stringContaining("/v1/documents/doc-123/chapters/ch-1/memory-proposals/prop-123/approve"),
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("can advance to the next chapter from the latest-change batch flow", async () => {
+    window.localStorage.setItem("book-agent.current-document-id", "doc-123");
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "继续当前转换" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "执行 follow-up" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("复核 rerun / recheck 结果")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/第 2 章 · Chapter Two/).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "处理下一章" }));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");
+    });
+    expect(screen.getByText("STYLE_DRIFT")).toBeInTheDocument();
   });
 
   it("supports assignment set and clear from the chapter workbench", async () => {

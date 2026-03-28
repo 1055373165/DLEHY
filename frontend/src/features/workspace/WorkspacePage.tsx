@@ -120,6 +120,13 @@ export function WorkspacePage() {
     ownerWorkloads.find((owner) => owner.owner_name === chapterWorklistFilters.assignedOwnerName) ?? null;
   const selectedQueueEntry =
     queueEntries.find((entry) => entry.chapter_id === selectedReviewChapterId) ?? null;
+  const selectedQueueIndex = selectedQueueEntry
+    ? queueEntries.findIndex((entry) => entry.chapter_id === selectedQueueEntry.chapter_id)
+    : -1;
+  const nextQueueEntry =
+    selectedQueueIndex >= 0 && selectedQueueIndex < queueEntries.length - 1
+      ? queueEntries[selectedQueueIndex + 1]
+      : null;
   const timelineGroups = groupTimelineEntries(currentChapterReviewDetail?.timeline ?? []);
   const selectedChapterRecentChange =
     recentOperatorChange?.chapterId === selectedReviewChapterId ? recentOperatorChange : null;
@@ -399,6 +406,18 @@ export function WorkspacePage() {
         helper: "已把焦点切到 follow-up action，可以直接核对 rerun 结果或继续执行下一步。",
       });
     }
+  }
+
+  function handleAdvanceToNextChapter() {
+    if (!nextQueueEntry) {
+      return;
+    }
+    setReviewMessage({
+      tone: "success",
+      text: `已切到第 ${nextQueueEntry.ordinal} 章，继续处理 ${nextQueueEntry.title_src || `Chapter ${nextQueueEntry.ordinal}`}。`,
+    });
+    setTimelineFocus(null);
+    selectReviewChapter(nextQueueEntry.chapter_id);
   }
 
   return (
@@ -1005,6 +1024,27 @@ export function WorkspacePage() {
                               onClick={handleRecommendedNextStep}
                             >
                               {selectedChapterNextStep.actionLabel}
+                            </button>
+                          </div>
+                        ) : null}
+                        {nextQueueEntry ? (
+                          <div className={styles.nextQueueCard}>
+                            <div>
+                              <span className={styles.deltaLabel}>Next in Queue</span>
+                              <strong className={styles.deltaValue}>
+                                第 {nextQueueEntry.ordinal} 章 · {nextQueueEntry.title_src || `Chapter ${nextQueueEntry.ordinal}`}
+                              </strong>
+                              <p className={styles.timelineDetail}>
+                                {nextQueueEntry.queue_driver} · SLA {slaStatusLabel(nextQueueEntry.sla_status)} · Pending{" "}
+                                {formatNumber(nextQueueEntry.memory_proposals.pending_proposal_count)}
+                              </p>
+                            </div>
+                            <button
+                              className={styles.ghostButton}
+                              type="button"
+                              onClick={handleAdvanceToNextChapter}
+                            >
+                              处理下一章
                             </button>
                           </div>
                         ) : null}
