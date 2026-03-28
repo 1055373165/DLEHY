@@ -750,10 +750,15 @@ describe("Workspace page", () => {
     });
     expect(screen.getByText("STYLE_DRIFT")).toBeInTheDocument();
     expect(screen.getByText("Follow-up Action · REBUILD_CHAPTER_BRIEF")).toBeInTheDocument();
+    expect(screen.getByText("连续处理摘要")).toBeInTheDocument();
+    expect(screen.getByText("Action 1")).toBeInTheDocument();
+    expect(screen.getByText("继续沿最近链路推进")).toBeInTheDocument();
     expect(screen.getByText("刚处理过的章节")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "回到 第 1 章 · Chapter One" })).toBeInTheDocument();
-    expect(screen.getByText("Action -> Rerun -> Recheck")).toBeInTheDocument();
-    expect(screen.getByText("回跳后先看 action 结果和 rerun/recheck 是否已经落盘。")).toBeInTheDocument();
+    expect(screen.getAllByText("Action -> Rerun -> Recheck").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("回跳后先看 action 结果和 rerun/recheck 是否已经落盘。").length
+    ).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "回到 第 1 章 · Chapter One" }));
 

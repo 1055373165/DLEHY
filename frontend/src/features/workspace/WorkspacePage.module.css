@@ -24,6 +24,9 @@
 .reviewLayout,
 .reviewColumn,
 .reviewSectionHeader,
+.sessionDigest,
+.sessionDigestGrid,
+.sessionDigestCard,
 .sessionTrail,
 .sessionTrailList,
 .sessionTrailCard,
@@ -349,6 +352,7 @@
 }
 
 .proposalList,
+.sessionDigest,
 .sessionTrail,
 .timelineList,
 .timelineGroupList,
@@ -375,6 +379,7 @@
 }
 
 .proposalCard,
+.sessionDigestCard,
 .sessionTrailCard,
 .timelineCard,
 .executionCard,
@@ -500,6 +505,15 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.sessionDigestGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sessionDigestCard {
+  background: color-mix(in srgb, var(--surface-strong) 84%, white);
 }
 
 .sessionTrail {
@@ -956,6 +970,7 @@
   }
 
   .reviewMetricGrid,
+  .sessionDigestGrid,
   .queueSummaryGrid,
   .queueFilterPanel,
   .contextGrid,
@@ -978,6 +993,7 @@
 @media (max-width: 640px) {
   .statGrid,
   .reviewMetricGrid,
+  .sessionDigestGrid,
   .proposalActions,
   .queueSummaryGrid,
   .queueFilterPanel,

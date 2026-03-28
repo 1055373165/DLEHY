@@ -80,6 +80,13 @@ type SessionTrailEntry = {
   chainLabel: string;
   revisitHint: string;
 };
+type SessionDigest = {
+  processedCount: number;
+  latestChapterLabel: string;
+  latestChainLabel: string;
+  kindSummary: string[];
+  continuityHint: string;
+};
 
 export function WorkspacePage() {
   const {
@@ -154,6 +161,7 @@ export function WorkspacePage() {
   const timelineGroups = groupTimelineEntries(currentChapterReviewDetail?.timeline ?? []);
   const selectedChapterRecentChange =
     recentOperatorChange?.chapterId === selectedReviewChapterId ? recentOperatorChange : null;
+  const sessionDigest = sessionTrail.length ? buildSessionDigest(sessionTrail) : null;
   const selectedChapterCurrentSnapshot = buildOperatorSnapshot(
     selectedQueueEntry,
     currentChapterReviewDetail
@@ -912,6 +920,37 @@ export function WorkspacePage() {
                     </div>
                   </div>
                 </div>
+
+                {sessionDigest ? (
+                  <div className={styles.sessionDigest}>
+                    <div className={styles.reviewSectionHeader}>
+                      <div>
+                        <div className={styles.fileLabel}>Session Digest</div>
+                        <h4 className={styles.reviewSectionTitle}>连续处理摘要</h4>
+                      </div>
+                      <p className={styles.reviewSectionCopy}>
+                        先看这一轮已经推进了多少章、主要沿着哪条链在推进，再决定是否继续批处理。
+                      </p>
+                    </div>
+                    <div className={styles.sessionDigestGrid}>
+                      <div className={styles.sessionDigestCard}>
+                        <span className={styles.deltaLabel}>已处理章节</span>
+                        <strong className={styles.deltaValue}>{formatNumber(sessionDigest.processedCount)} 章</strong>
+                        <p className={styles.timelineDetail}>{sessionDigest.kindSummary.join(" · ")}</p>
+                      </div>
+                      <div className={styles.sessionDigestCard}>
+                        <span className={styles.deltaLabel}>最近主链</span>
+                        <strong className={styles.sessionTrailChain}>{sessionDigest.latestChainLabel}</strong>
+                        <p className={styles.timelineDetail}>{sessionDigest.latestChapterLabel}</p>
+                      </div>
+                      <div className={styles.sessionDigestCard}>
+                        <span className={styles.deltaLabel}>连续处理提示</span>
+                        <strong className={styles.deltaValue}>继续沿最近链路推进</strong>
+                        <p className={styles.timelineDetail}>{sessionDigest.continuityHint}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {sessionTrail.length ? (
                   <div className={styles.sessionTrail}>
@@ -1738,6 +1777,24 @@ function sessionTrailRevisitHint(kind: RecentOperatorChange["kind"]) {
     return "回跳后先看 owner 和 assignment 变化是否已经生效。";
   }
   return "回跳后先看 action 结果和 rerun/recheck 是否已经落盘。";
+}
+
+function buildSessionDigest(entries: SessionTrailEntry[]): SessionDigest {
+  const latest = entries[0];
+  const proposalCount = entries.filter((entry) => entry.kind === "proposal").length;
+  const assignmentCount = entries.filter((entry) => entry.kind === "assignment").length;
+  const actionCount = entries.filter((entry) => entry.kind === "action").length;
+  return {
+    processedCount: entries.length,
+    latestChapterLabel: latest.chapterLabel,
+    latestChainLabel: latest.chainLabel,
+    kindSummary: [
+      actionCount ? `Action ${actionCount}` : null,
+      proposalCount ? `Proposal ${proposalCount}` : null,
+      assignmentCount ? `Assignment ${assignmentCount}` : null,
+    ].filter(Boolean) as string[],
+    continuityHint: latest.revisitHint,
+  };
 }
 
 function timelineEntryMatchesRecentChange(
