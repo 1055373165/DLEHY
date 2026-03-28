@@ -77,6 +77,8 @@ type SessionTrailEntry = {
   changeTitle: string;
   summary: string;
   kind: RecentOperatorChange["kind"];
+  chainLabel: string;
+  revisitHint: string;
 };
 
 export function WorkspacePage() {
@@ -455,6 +457,8 @@ export function WorkspacePage() {
           changeTitle: selectedChapterRecentChange.title,
           summary,
           kind: selectedChapterRecentChange.kind,
+          chainLabel: sessionTrailChainLabel(selectedChapterRecentChange.kind),
+          revisitHint: sessionTrailRevisitHint(selectedChapterRecentChange.kind),
         } satisfies SessionTrailEntry;
         return [nextEntry, ...current.filter((entry) => entry.chapterId !== nextEntry.chapterId)].slice(0, 3);
       });
@@ -942,8 +946,13 @@ export function WorkspacePage() {
                             <span className={styles.changeKindBadge}>{recentChangeKindLabel(entry.kind)}</span>
                           </div>
                           <strong className={styles.deltaValue}>{entry.chapterLabel}</strong>
+                          <div className={styles.sessionTrailMeta}>
+                            <span className={styles.deltaLabel}>处理链</span>
+                            <strong className={styles.sessionTrailChain}>{entry.chainLabel}</strong>
+                          </div>
                           <p className={styles.timelineDetail}>{entry.changeTitle}</p>
                           <p className={styles.queueDeltaHint}>{entry.summary}</p>
+                          <p className={styles.sessionTrailHint}>{entry.revisitHint}</p>
                         </button>
                       ))}
                     </div>
@@ -1709,6 +1718,26 @@ function recentChangeKindLabel(kind: RecentOperatorChange["kind"]) {
     return "Assignment 回写";
   }
   return "Action 回写";
+}
+
+function sessionTrailChainLabel(kind: RecentOperatorChange["kind"]) {
+  if (kind === "proposal") {
+    return "Proposal -> Snapshot -> Blocker";
+  }
+  if (kind === "assignment") {
+    return "Assignment -> Owner Handoff";
+  }
+  return "Action -> Rerun -> Recheck";
+}
+
+function sessionTrailRevisitHint(kind: RecentOperatorChange["kind"]) {
+  if (kind === "proposal") {
+    return "回跳后先看 proposal 和 blocker 是否继续收敛。";
+  }
+  if (kind === "assignment") {
+    return "回跳后先看 owner 和 assignment 变化是否已经生效。";
+  }
+  return "回跳后先看 action 结果和 rerun/recheck 是否已经落盘。";
 }
 
 function timelineEntryMatchesRecentChange(
