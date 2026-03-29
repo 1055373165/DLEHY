@@ -1382,6 +1382,11 @@ describe("Workspace page", () => {
     expect(
       screen.getByText(/Assignment -> Owner Handoff 已经保持当前章的放行态；这条放行 lane 收口后，下一步切到 第 2 章 · Chapter Two 继续最后观察。/)
     ).toBeInTheDocument();
+    expect(screen.getByText("放行 lane 收口反馈")).toBeInTheDocument();
+    expect(screen.getByText("还剩 0 章可直接放行 · 之后观察 1 章")).toBeInTheDocument();
+    expect(
+      screen.getByText(/当前章已经完成这轮放行动作；这条放行 lane 已收口，下一步切到 第 2 章 · Chapter Two，继续 1 章最后观察。/)
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "放行后看最后观察" }));
 

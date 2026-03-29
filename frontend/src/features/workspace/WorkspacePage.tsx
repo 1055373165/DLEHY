@@ -151,6 +151,10 @@ type ReleaseLaneResultFeedback = {
   statusLabel: string;
   helper: string;
 };
+type ReleaseLaneContinuationFeedback = {
+  statusLabel: string;
+  helper: string;
+};
 type QueueLensPreset = {
   key: string;
   label: string;
@@ -365,6 +369,20 @@ export function WorkspacePage() {
       ? buildReleaseLaneResultFeedback({
           statusLabel: selectedQueueOutcome.statusLabel,
           chainLabel: selectedQueueOutcome.chainLabel,
+          nextQueueEntry,
+          observeFallback: releaseLaneObserveFallback,
+        })
+      : null;
+  const activeReleaseLaneContinuationFeedback =
+    isFlowMode &&
+    activeQueueLens?.outcome === "release-ready" &&
+    selectedChapterRecentChange &&
+    selectedQueueOutcome
+      ? buildReleaseLaneContinuationFeedback({
+          statusLabel: selectedQueueOutcome.statusLabel,
+          visibleCount: visibleQueueEntries.length,
+          selectedIndex: selectedQueueIndex,
+          observeCount: queueObserveCount,
           nextQueueEntry,
           observeFallback: releaseLaneObserveFallback,
         })
@@ -1417,6 +1435,15 @@ export function WorkspacePage() {
                               <span className={styles.deltaLabel}>连续放行结果反馈</span>
                               <strong className={styles.deltaValue}>{activeReleaseLaneResultFeedback.statusLabel}</strong>
                               <p className={styles.timelineDetail}>{activeReleaseLaneResultFeedback.helper}</p>
+                            </div>
+                          ) : null}
+                          {activeReleaseLaneContinuationFeedback ? (
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>放行 lane 收口反馈</span>
+                              <strong className={styles.deltaValue}>
+                                {activeReleaseLaneContinuationFeedback.statusLabel}
+                              </strong>
+                              <p className={styles.timelineDetail}>{activeReleaseLaneContinuationFeedback.helper}</p>
                             </div>
                           ) : null}
                           {activeReleaseGate ? (
@@ -3192,6 +3219,49 @@ function buildReleaseLaneResultFeedback(input: {
   return {
     statusLabel: "这次操作后本轮放行已收口",
     helper: `${input.chainLabel} 已经保持当前章的放行态；当前 scope 下没有更多放行候选或最后观察章节，可以回到整条队列继续扫描。`,
+  };
+}
+
+function buildReleaseLaneContinuationFeedback(input: {
+  statusLabel: string;
+  visibleCount: number;
+  selectedIndex: number;
+  observeCount: number;
+  nextQueueEntry: {
+    ordinal: number;
+    title_src?: string | null;
+  } | null;
+  observeFallback: ReleaseLaneFallback | null;
+}): ReleaseLaneContinuationFeedback {
+  if (input.statusLabel !== "适合放行") {
+    const remainingReleaseReady = Math.max(input.visibleCount - 1, 0);
+    const observeAfter = input.observeCount + 1;
+    return {
+      statusLabel: `还剩 ${formatNumber(remainingReleaseReady)} 章可直接放行 · 之后观察 ${formatNumber(observeAfter)} 章`,
+      helper:
+        remainingReleaseReady > 0
+          ? `当前章退回继续观察后，这条放行 lane 里还剩 ${formatNumber(
+              remainingReleaseReady
+            )} 章可直接推进；观察 lane 扩大到 ${formatNumber(observeAfter)} 章。`
+          : `当前章退回继续观察后，这条放行 lane 已收口；下一步先回到 ${formatNumber(
+              observeAfter
+            )} 章最后观察。`,
+    };
+  }
+
+  const currentIndex = input.selectedIndex >= 0 ? input.selectedIndex : 0;
+  const remainingReleaseReady = Math.max(input.visibleCount - currentIndex - 1, 0);
+  return {
+    statusLabel: `还剩 ${formatNumber(remainingReleaseReady)} 章可直接放行 · 之后观察 ${formatNumber(input.observeCount)} 章`,
+    helper: input.nextQueueEntry
+      ? `当前章已经完成这轮放行动作；继续第 ${input.nextQueueEntry.ordinal} 章 · ${
+          input.nextQueueEntry.title_src || `Chapter ${input.nextQueueEntry.ordinal}`
+        } 后，这条 lane 还剩 ${formatNumber(remainingReleaseReady)} 章可直接推进。`
+      : input.observeFallback
+        ? `当前章已经完成这轮放行动作；这条放行 lane 已收口，下一步切到 ${input.observeFallback.chapterLabel}，继续 ${formatNumber(
+            input.observeCount
+          )} 章最后观察。`
+        : "当前章已经完成这轮放行动作；这条放行 lane 和最后观察 lane 都已收口，可以回到整条队列继续扫描。",
   };
 }
 
