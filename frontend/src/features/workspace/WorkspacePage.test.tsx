@@ -1219,7 +1219,14 @@ describe("Workspace page", () => {
     expect(screen.getByText("当前 operator lane")).toBeInTheDocument();
     expect(screen.getByText("共享队列 · 继续观察")).toBeInTheDocument();
     expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    expect(screen.getByText("当前 lane 先处理")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看 blocker / follow-up" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切回全部章节" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查看 blocker / follow-up" }));
+
+    expect(screen.getByText("Current Focus")).toBeInTheDocument();
+    expect(screen.getAllByText("Follow-up Action · REBUILD_PACKET_THEN_RERUN").length).toBeGreaterThan(0);
 
     await user.selectOptions(screen.getByLabelText("owner 视角筛选"), "night-shift");
 

@@ -115,6 +115,13 @@ type FocusedPriorityItem = {
   section: TimelineFocusTarget["section"];
   actionLabel: string;
 };
+type QueueLensPriority = {
+  title: string;
+  value: string;
+  helper: string;
+  section: TimelineFocusTarget["section"];
+  actionLabel: string;
+};
 type QueueLensPreset = {
   key: string;
   label: string;
@@ -290,6 +297,10 @@ export function WorkspacePage() {
     !isFlowMode && currentChapterReviewDetail
       ? buildFocusedPriorityItems(currentChapterReviewDetail, selectedQueueEntry)
       : [];
+  const activeQueueLensPriority =
+    isFlowMode && activeQueueLens && currentChapterReviewDetail
+      ? buildQueueLensPriority(activeQueueLens, currentChapterReviewDetail, selectedQueueEntry)
+      : null;
   const focusedPrimaryItem = !isFlowMode && focusedPriorityItems.length ? focusedPriorityItems[0] : null;
   const focusedSecondaryItems = focusedPrimaryItem ? focusedPriorityItems.slice(1) : [];
   const focusedActionEntry =
@@ -694,6 +705,48 @@ export function WorkspacePage() {
       actionId: actionEntry.action_id,
       label: `Follow-up Action · ${actionEntry.action_type || actionEntry.issue_type || shorten(actionEntry.action_id, 5)}`,
       helper: "已把焦点切到当前章节的 follow-up action，可以直接执行或核对 rerun / recheck 收敛情况。",
+    });
+  }
+
+  function handleFocusQueueLensPriority(priority: QueueLensPriority) {
+    if (!currentChapterReviewDetail) {
+      return;
+    }
+    if (priority.section === "proposal") {
+      const proposal = currentChapterReviewDetail.memory_proposals.pending_proposals[0];
+      if (!proposal) {
+        return;
+      }
+      setTimelineFocus({
+        eventId: `queue-lens-priority-proposal-${proposal.proposal_id}`,
+        section: "proposal",
+        proposalId: proposal.proposal_id,
+        label: `Memory Override · ${shorten(proposal.proposal_id, 5)}`,
+        helper: priority.helper,
+      });
+      return;
+    }
+    if (priority.section === "assignment") {
+      setTimelineFocus({
+        eventId: `queue-lens-priority-assignment-${selectedReviewChapterId ?? "chapter"}`,
+        section: "assignment",
+        label: currentChapterReviewDetail.assignment?.owner_name
+          ? `Assignment · ${currentChapterReviewDetail.assignment.owner_name}`
+          : "Assignment · 共享队列",
+        helper: priority.helper,
+      });
+      return;
+    }
+    const actionEntry = currentChapterReviewDetail.recent_actions[0];
+    if (!actionEntry) {
+      return;
+    }
+    setTimelineFocus({
+      eventId: `queue-lens-priority-action-${actionEntry.action_id}`,
+      section: "actions",
+      actionId: actionEntry.action_id,
+      label: `Follow-up Action · ${actionEntry.action_type || actionEntry.issue_type || shorten(actionEntry.action_id, 5)}`,
+      helper: priority.helper,
     });
   }
 
@@ -1224,9 +1277,27 @@ export function WorkspacePage() {
                               </p>
                             </div>
                           </div>
+                          {activeQueueLensPriority ? (
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>当前 lane 先处理</span>
+                              <strong className={styles.deltaValue}>{activeQueueLensPriority.title}</strong>
+                              <p className={styles.timelineDetail}>
+                                {activeQueueLensPriority.value} · {activeQueueLensPriority.helper}
+                              </p>
+                            </div>
+                          ) : null}
                           <div className={styles.nextStepActions}>
+                            {activeQueueLensPriority ? (
+                              <button
+                                className={styles.button}
+                                type="button"
+                                onClick={() => handleFocusQueueLensPriority(activeQueueLensPriority)}
+                              >
+                                {activeQueueLensPriority.actionLabel}
+                              </button>
+                            ) : null}
                             {nextQueueEntry ? (
-                              <button className={styles.button} type="button" onClick={handleAdvanceToNextChapter}>
+                              <button className={styles.ghostButton} type="button" onClick={handleAdvanceToNextChapter}>
                                 {activeQueueLens.outcome === "release-ready"
                                   ? "切到下一条放行候选"
                                   : "切到下一条继续观察"}
@@ -2678,6 +2749,62 @@ function buildQueueEntryOutcome(entry: {
   return {
     statusLabel: "适合放行",
     reasonLabel: "当前未见 blocker / proposal / open issue",
+  };
+}
+
+function buildQueueLensPriority(
+  lens: QueueLensPreset,
+  detail: {
+    current_active_blocking_issue_count: number;
+    memory_proposals: { pending_proposal_count: number };
+    assignment?: { owner_name?: string | null } | null;
+    recent_actions: Array<{ status: string; action_type?: string | null }>;
+  },
+  queueEntry:
+    | {
+        queue_driver?: string | null;
+        open_issue_count: number;
+      }
+    | null
+): QueueLensPriority {
+  if (lens.outcome === "observe") {
+    const firstPriority = buildFocusedPriorityItems(detail, queueEntry)[0];
+    return {
+      title: firstPriority.label,
+      value: firstPriority.value,
+      helper: firstPriority.hint,
+      section: firstPriority.section,
+      actionLabel: firstPriority.actionLabel,
+    };
+  }
+  const latestAction = detail.recent_actions[0];
+  if (latestAction) {
+    return {
+      title: "最终复核",
+      value: `${latestAction.action_type || "当前 action"} · ${statusLabel(latestAction.status)}`,
+      helper:
+        latestAction.status === "completed"
+          ? "这条 lane 里的章节已经接近可放行，先核对最新 follow-up 和 timeline 是否都进入稳定完成态。"
+          : "虽然当前章节已进入放行候选，但最近 action 还没完成，先确认结果是否真正落盘。",
+      section: "actions",
+      actionLabel: "查看最终复核",
+    };
+  }
+  if (detail.memory_proposals.pending_proposal_count > 0) {
+    return {
+      title: "最终确认 proposal",
+      value: `${detail.memory_proposals.pending_proposal_count} 条待审批`,
+      helper: "这条 lane 已接近可放行，但仍有 proposal 挂着，先把 memory override 收口。",
+      section: "proposal",
+      actionLabel: "查看当前 proposal",
+    };
+  }
+  return {
+    title: "最终确认 owner",
+    value: detail.assignment?.owner_name ? `Owner ${detail.assignment.owner_name}` : "共享队列",
+    helper: "这条 lane 没有 blocker / proposal 压力，最后确认 owner handoff 和当前章节语义是否一致。",
+    section: "assignment",
+    actionLabel: "查看当前 owner",
   };
 }
 
