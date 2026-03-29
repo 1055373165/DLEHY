@@ -161,6 +161,11 @@ type ReleaseLaneExitStrategy = {
   actionLabel: string;
   actionKind: "observe-current" | "observe-fallback" | "next-release" | "reset";
 };
+type ReleaseLaneCompletionState = {
+  statusLabel: string;
+  helper: string;
+  queueHint: string;
+};
 type QueueLensPreset = {
   key: string;
   label: string;
@@ -399,6 +404,17 @@ export function WorkspacePage() {
     selectedChapterRecentChange &&
     selectedQueueOutcome
       ? buildReleaseLaneExitStrategy({
+          statusLabel: selectedQueueOutcome.statusLabel,
+          nextQueueEntry,
+          observeFallback: releaseLaneObserveFallback,
+        })
+      : null;
+  const activeReleaseLaneCompletionState =
+    isFlowMode &&
+    activeQueueLens?.outcome === "release-ready" &&
+    selectedChapterRecentChange &&
+    selectedQueueOutcome
+      ? buildReleaseLaneCompletionState({
           statusLabel: selectedQueueOutcome.statusLabel,
           nextQueueEntry,
           observeFallback: releaseLaneObserveFallback,
@@ -1510,6 +1526,13 @@ export function WorkspacePage() {
                               </div>
                             </div>
                           ) : null}
+                          {activeReleaseLaneCompletionState ? (
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>放行链完成态</span>
+                              <strong className={styles.deltaValue}>{activeReleaseLaneCompletionState.statusLabel}</strong>
+                              <p className={styles.timelineDetail}>{activeReleaseLaneCompletionState.helper}</p>
+                            </div>
+                          ) : null}
                           {activeReleaseGate ? (
                             <div className={styles.deltaCard}>
                               <span className={styles.deltaLabel}>放行门</span>
@@ -1698,6 +1721,11 @@ export function WorkspacePage() {
                               {activeQueueLens?.outcome === "release-ready" && activeReleaseLaneExitStrategy ? (
                                 <p className={styles.queueOutcomeHint}>
                                   放行链反馈 · {activeReleaseLaneExitStrategy.statusLabel}
+                                </p>
+                              ) : null}
+                              {activeQueueLens?.outcome === "release-ready" && activeReleaseLaneCompletionState ? (
+                                <p className={styles.queueOutcomeHint}>
+                                  放行链完成态 · {activeReleaseLaneCompletionState.queueHint}
                                 </p>
                               ) : null}
                             </>
@@ -3374,6 +3402,44 @@ function buildReleaseLaneExitStrategy(input: {
     helper: "当前 release-ready lane 和最后观察 lane 都已收口，下一步回到整条队列继续扫描。",
     actionLabel: "回到整条队列",
     actionKind: "reset",
+  };
+}
+
+function buildReleaseLaneCompletionState(input: {
+  statusLabel: string;
+  nextQueueEntry: {
+    ordinal: number;
+    title_src?: string | null;
+  } | null;
+  observeFallback: ReleaseLaneFallback | null;
+}): ReleaseLaneCompletionState {
+  if (input.statusLabel !== "适合放行") {
+    return {
+      statusLabel: "这条放行链已退回观察",
+      helper: "当前章这次操作后不再处于 release-ready 态，这条放行链会先暂停，优先回到继续观察 lane 收口未完成的 gate。",
+      queueHint: "退回继续观察",
+    };
+  }
+  if (input.nextQueueEntry) {
+    return {
+      statusLabel: "这条放行链仍在推进中",
+      helper: `当前章已经完成这轮放行动作，接下来由第 ${input.nextQueueEntry.ordinal} 章 · ${
+        input.nextQueueEntry.title_src || `Chapter ${input.nextQueueEntry.ordinal}`
+      } 继续这条 release-ready lane。`,
+      queueHint: "继续推进中",
+    };
+  }
+  if (input.observeFallback) {
+    return {
+      statusLabel: "这条放行链本轮已收口",
+      helper: `当前章已经完成这轮放行动作，release-ready lane 暂时收口；下一步切到 ${input.observeFallback.chapterLabel} 做最后观察。`,
+      queueHint: "本轮已收口",
+    };
+  }
+  return {
+    statusLabel: "当前 scope 已整体收口",
+    helper: "当前 release-ready lane 和最后观察 lane 都没有待处理章节，可以回到整条队列重新扫描新的候选。",
+    queueHint: "整体已收口",
   };
 }
 

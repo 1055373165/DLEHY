@@ -1392,8 +1392,16 @@ describe("Workspace page", () => {
     expect(
       screen.getByText(/当前 release-ready lane 已收口，下一步切到 第 2 章 · Chapter Two 继续最后观察。/)
     ).toBeInTheDocument();
+    expect(screen.getByText("放行链完成态")).toBeInTheDocument();
+    expect(screen.getByText("这条放行链本轮已收口")).toBeInTheDocument();
+    expect(
+      screen.getByText(/当前章已经完成这轮放行动作，release-ready lane 暂时收口；下一步切到 第 2 章 · Chapter Two 做最后观察。/)
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /第 3 章 · Chapter Three/ })).toHaveTextContent(
       "放行链反馈 · 切到最后观察 lane"
+    );
+    expect(screen.getByRole("button", { name: /第 3 章 · Chapter Three/ })).toHaveTextContent(
+      "放行链完成态 · 本轮已收口"
     );
 
     await user.click(screen.getByRole("button", { name: "切到最后观察 lane" }));
