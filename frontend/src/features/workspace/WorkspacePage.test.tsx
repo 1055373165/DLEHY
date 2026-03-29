@@ -1216,6 +1216,10 @@ describe("Workspace page", () => {
     expect(screen.queryByRole("button", { name: /第 2 章 · Chapter Two/ })).not.toBeInTheDocument();
     expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-1");
     expect(screen.getByText("放行 0 · 观察 1")).toBeInTheDocument();
+    expect(screen.getByText("当前 operator lane")).toBeInTheDocument();
+    expect(screen.getByText("共享队列 · 继续观察")).toBeInTheDocument();
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切回全部章节" })).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("owner 视角筛选"), "night-shift");
 
@@ -1238,5 +1242,6 @@ describe("Workspace page", () => {
     });
     expect(screen.queryByRole("button", { name: /第 1 章 · Chapter One/ })).not.toBeInTheDocument();
     expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");
+    expect(screen.getAllByText("night-shift · 继续观察").length).toBeGreaterThan(0);
   });
 });

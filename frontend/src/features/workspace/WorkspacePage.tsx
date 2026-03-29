@@ -223,6 +223,15 @@ export function WorkspacePage() {
     selectedOwnerReleaseReadyCount,
     selectedOwnerObserveCount,
   });
+  const activeQueueLens =
+    operatorLenses.find((lens) =>
+      queueLensIsActive(
+        lens,
+        chapterWorklistFilters.assignment,
+        chapterWorklistFilters.assignedOwnerName,
+        queueOutcomeFilter
+      )
+    ) ?? null;
   const selectedQueueEntry =
     visibleQueueEntries.find((entry) => entry.chapter_id === selectedReviewChapterId) ?? null;
   const selectedQueueIndex = selectedQueueEntry
@@ -757,6 +766,12 @@ export function WorkspacePage() {
     setChapterAssignmentFilter(lens.assignment);
   }
 
+  function handleResetQueueLens() {
+    setQueueOutcomeFilter("all");
+    setChapterAssignedOwnerFilter("");
+    setChapterAssignmentFilter("all");
+  }
+
   return (
     <div className={styles.grid}>
       <div className={styles.summaryStack}>
@@ -1150,12 +1165,7 @@ export function WorkspacePage() {
                       </div>
                       <div className={styles.modeSwitchControls}>
                         {operatorLenses.map((lens) => {
-                          const active = queueLensIsActive(
-                            lens,
-                            chapterWorklistFilters.assignment,
-                            chapterWorklistFilters.assignedOwnerName,
-                            queueOutcomeFilter
-                          );
+                          const active = activeQueueLens?.key === lens.key;
                           return (
                             <button
                               key={lens.key}
@@ -1175,6 +1185,59 @@ export function WorkspacePage() {
                           ? `当前已选 owner ${selectedOwnerWorkload.owner_name}，可以直接切到这位 operator 名下的放行候选或继续观察章节。`
                           : "先从共享队列切观察/放行候选，再决定是否收窄到具体 owner。"}
                       </p>
+                      {activeQueueLens ? (
+                        <div className={styles.nextStepCard}>
+                          <span className={styles.deltaLabel}>当前 operator lane</span>
+                          <strong className={styles.deltaValue}>{activeQueueLens.label}</strong>
+                          <p className={styles.timelineDetail}>{activeQueueLens.helper}</p>
+                          <div className={styles.deltaGrid}>
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>当前位置</span>
+                              <strong className={styles.deltaValue}>
+                                {visibleQueueEntries.length
+                                  ? `${formatNumber(Math.max(selectedQueueIndex + 1, 1))} / ${formatNumber(
+                                      visibleQueueEntries.length
+                                    )}`
+                                  : "0 / 0"}
+                              </strong>
+                              <p className={styles.timelineDetail}>
+                                {selectedQueueEntry
+                                  ? `当前聚焦第 ${selectedQueueEntry.ordinal} 章 · ${selectedQueueEntry.title_src || `Chapter ${selectedQueueEntry.ordinal}`}`
+                                  : "当前 lane 下没有可聚焦章节。"}
+                              </p>
+                            </div>
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>下一步</span>
+                              <strong className={styles.deltaValue}>
+                                {nextQueueEntry
+                                  ? `第 ${nextQueueEntry.ordinal} 章`
+                                  : visibleQueueEntries.length
+                                    ? "已到 lane 末尾"
+                                    : "等待切回其他视角"}
+                              </strong>
+                              <p className={styles.timelineDetail}>
+                                {nextQueueEntry
+                                  ? `下一章是 ${nextQueueEntry.title_src || `Chapter ${nextQueueEntry.ordinal}`}`
+                                  : visibleQueueEntries.length
+                                    ? "这条子队列已经扫到末尾，适合停在当前章继续处理或切回整条队列。"
+                                    : "当前 lane 没有匹配章节，可以切回全部章节或调整 owner / assignment。"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className={styles.nextStepActions}>
+                            {nextQueueEntry ? (
+                              <button className={styles.button} type="button" onClick={handleAdvanceToNextChapter}>
+                                {activeQueueLens.outcome === "release-ready"
+                                  ? "切到下一条放行候选"
+                                  : "切到下一条继续观察"}
+                              </button>
+                            ) : null}
+                            <button className={styles.ghostButton} type="button" onClick={handleResetQueueLens}>
+                              切回全部章节
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </section>
                 ) : (
