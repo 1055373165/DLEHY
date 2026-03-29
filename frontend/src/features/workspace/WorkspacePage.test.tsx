@@ -1407,6 +1407,9 @@ describe("Workspace page", () => {
     expect(
       screen.getByText(/这一轮批处理已经完成当前 release-ready lane 的 1 章放行；下一步回到 1 章最后观察收尾。/)
     ).toBeInTheDocument();
+    expect(screen.getByText("Lane 摘要")).toBeInTheDocument();
+    expect(screen.getAllByText("批处理摘要 · 放行 1 / 1 · 观察 1").length).toBeGreaterThan(0);
+    expect(screen.getByText("当前阶段 · 已转入最后观察收尾")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /第 3 章 · Chapter Three/ })).toHaveTextContent(
       "放行链反馈 · 切到最后观察 lane"
     );

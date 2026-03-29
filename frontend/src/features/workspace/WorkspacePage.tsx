@@ -1461,6 +1461,22 @@ export function WorkspacePage() {
                           <span className={styles.deltaLabel}>当前 operator lane</span>
                           <strong className={styles.deltaValue}>{activeQueueLens.label}</strong>
                           <p className={styles.timelineDetail}>{activeQueueLens.helper}</p>
+                          {activeQueueLens.outcome === "release-ready" &&
+                          (activeReleaseLaneBatchDigest || activeReleaseLaneBatchPhase) ? (
+                            <div className={styles.filterChipRow}>
+                              <span className={styles.filterChip}>Lane 摘要</span>
+                              {activeReleaseLaneBatchDigest ? (
+                                <span className={styles.filterChip}>
+                                  批处理摘要 · {activeReleaseLaneBatchDigest.queueHint}
+                                </span>
+                              ) : null}
+                              {activeReleaseLaneBatchPhase ? (
+                                <span className={styles.filterChip}>
+                                  当前阶段 · {activeReleaseLaneBatchPhase.queueHint}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <div className={styles.deltaGrid}>
                             <div className={styles.deltaCard}>
                               <span className={styles.deltaLabel}>当前位置</span>
