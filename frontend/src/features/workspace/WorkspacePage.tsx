@@ -89,6 +89,16 @@ type SessionDigest = {
   continuityHint: string;
 };
 
+const STORAGE_KEY_WORKBENCH_MODE = "book-agent.workbench-mode";
+
+function readInitialWorkbenchMode(): WorkbenchMode {
+  if (typeof window === "undefined") {
+    return "flow";
+  }
+  const persisted = window.localStorage.getItem(STORAGE_KEY_WORKBENCH_MODE);
+  return persisted === "focused" || persisted === "flow" ? persisted : "flow";
+}
+
 export function WorkspacePage() {
   const {
     currentDocument,
@@ -134,7 +144,7 @@ export function WorkspacePage() {
   const [pendingChapterFocus, setPendingChapterFocus] = useState<PendingChapterFocus | null>(null);
   const [recentOperatorChange, setRecentOperatorChange] = useState<RecentOperatorChange | null>(null);
   const [sessionTrail, setSessionTrail] = useState<SessionTrailEntry[]>([]);
-  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>("flow");
+  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>(() => readInitialWorkbenchMode());
   const [reviewerName, setReviewerName] = useState("reviewer-ui");
   const [reviewerNote, setReviewerNote] = useState("");
   const [assignmentOwner, setAssignmentOwner] = useState("");
@@ -203,6 +213,13 @@ export function WorkspacePage() {
   useEffect(() => {
     setAssignmentOwner(currentChapterReviewDetail?.assignment?.owner_name ?? "");
   }, [currentChapterReviewDetail?.assignment?.owner_name, selectedReviewChapterId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(STORAGE_KEY_WORKBENCH_MODE, workbenchMode);
+  }, [workbenchMode]);
 
   useEffect(() => {
     setLastActionExecution(null);

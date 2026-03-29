@@ -1,9 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
 import { App } from "../../app/App";
+
+const STORAGE_KEY_DOCUMENT = "book-agent.current-document-id";
+const STORAGE_KEY_WORKBENCH_MODE = "book-agent.workbench-mode";
 
 type ProposalStatus = "proposed" | "committed" | "rejected" | "none";
 
@@ -657,6 +660,10 @@ function installFetchMock() {
   return fetchMock;
 }
 
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 function jsonResponse(payload: unknown) {
   return new Response(JSON.stringify(payload), {
     status: 200,
@@ -770,7 +777,7 @@ describe("Workspace page", () => {
   }, 15000);
 
   it("switches between focused and flow workbench modes", async () => {
-    window.localStorage.setItem("book-agent.current-document-id", "doc-123");
+    window.localStorage.setItem(STORAGE_KEY_DOCUMENT, "doc-123");
     const user = userEvent.setup();
 
     render(
@@ -788,6 +795,7 @@ describe("Workspace page", () => {
     await user.click(screen.getByRole("tab", { name: "单章精查" }));
 
     expect(screen.getByRole("tab", { name: "单章精查", selected: true })).toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY_WORKBENCH_MODE)).toBe("focused");
     expect(
       screen.getByText("适合专注当前章节，隐藏连续处理提示，只保留当前章节的决策与收敛信息。")
     ).toBeInTheDocument();
@@ -800,10 +808,29 @@ describe("Workspace page", () => {
     await user.click(screen.getByRole("tab", { name: "连续处理" }));
 
     expect(screen.getByRole("tab", { name: "连续处理", selected: true })).toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY_WORKBENCH_MODE)).toBe("flow");
     expect(
       screen.getByText("适合连续处理章节队列，保留 session digest、session trail 和 next-in-queue 推荐。")
     ).toBeInTheDocument();
   }, 15000);
+
+  it("restores a persisted workbench mode preference", async () => {
+    window.localStorage.setItem(STORAGE_KEY_DOCUMENT, "doc-123");
+    window.localStorage.setItem(STORAGE_KEY_WORKBENCH_MODE, "focused");
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "继续当前转换" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "单章精查", selected: true })).toBeInTheDocument();
+    expect(
+      screen.getByText("适合专注当前章节，隐藏连续处理提示，只保留当前章节的决策与收敛信息。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("连续处理摘要")).not.toBeInTheDocument();
+  });
 
   it("supports assignment set and clear from the chapter workbench", async () => {
     window.localStorage.setItem("book-agent.current-document-id", "doc-123");
