@@ -1407,6 +1407,8 @@ describe("Workspace page", () => {
     expect(
       screen.getAllByText(/这一轮批处理已经完成当前 release-ready lane 的 1 章放行；下一步回到 1 章最后观察收尾。/).length
     ).toBeGreaterThan(0);
+    expect(screen.getByText("放行链总览")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "按当前建议处理" })).toBeInTheDocument();
     expect(screen.getByText("Lane 摘要")).toBeInTheDocument();
     expect(screen.getAllByText("批处理摘要 · 放行 1 / 1 · 观察 1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("当前阶段 · 已转入最后观察收尾").length).toBeGreaterThan(0);
@@ -1430,7 +1432,7 @@ describe("Workspace page", () => {
       "批处理摘要 · 放行 1 / 1 · 观察 1"
     );
 
-    await user.click(screen.getAllByRole("button", { name: "切到最后观察 lane" })[0]);
+    await user.click(screen.getByRole("button", { name: "按当前建议处理" }));
 
     await waitFor(() => {
       expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");

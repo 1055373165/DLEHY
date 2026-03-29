@@ -1410,6 +1410,39 @@ export function WorkspacePage() {
                     ) : (
                       <p className={styles.timelineDetail}>当前未启用过滤，适合做整条队列扫描。</p>
                     )}
+                    {activeQueueLens?.outcome === "release-ready" &&
+                    (activeReleaseLaneBatchDigest || activeReleaseLaneExitStrategy || activeReleaseLaneBatchPhase) ? (
+                      <div className={styles.nextStepCard}>
+                        <span className={styles.deltaLabel}>放行链总览</span>
+                        <strong className={styles.deltaValue}>
+                          {activeReleaseLaneBatchDigest?.statusLabel ?? activeReleaseLaneBatchPhase?.statusLabel}
+                        </strong>
+                        <p className={styles.timelineDetail}>
+                          {activeReleaseLaneExitStrategy
+                            ? `当前建议：${activeReleaseLaneExitStrategy.statusLabel}。${activeReleaseLaneExitStrategy.helper}`
+                            : activeReleaseLaneBatchDigest?.helper ?? activeReleaseLaneBatchPhase?.helper}
+                        </p>
+                        <div className={styles.filterChipRow}>
+                          {activeReleaseLaneBatchDigest ? (
+                            <span className={styles.filterChip}>
+                              批处理摘要 · {activeReleaseLaneBatchDigest.queueHint}
+                            </span>
+                          ) : null}
+                          {activeReleaseLaneBatchPhase ? (
+                            <span className={styles.filterChip}>
+                              当前阶段 · {activeReleaseLaneBatchPhase.queueHint}
+                            </span>
+                          ) : null}
+                        </div>
+                        {activeReleaseLaneExitStrategy ? (
+                          <div className={styles.nextStepActions}>
+                            <button className={styles.button} type="button" onClick={handleReleaseLaneExitStrategy}>
+                              按当前建议处理
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {selectedOwnerWorkload ? (
                       <div className={styles.ownerSnapshotGrid}>
                         <div className={styles.ownerSnapshotCard}>
