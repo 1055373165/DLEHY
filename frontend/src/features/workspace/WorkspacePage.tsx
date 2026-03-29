@@ -2268,6 +2268,18 @@ export function WorkspacePage() {
                           ) : null}
                         </div>
                       ) : null}
+                      {showReleaseLaneSessionDigest && activeReleaseLaneExitStrategy ? (
+                        <div className={styles.sessionDigestCard}>
+                          <span className={styles.deltaLabel}>本轮建议</span>
+                          <strong className={styles.deltaValue}>{activeReleaseLaneExitStrategy.statusLabel}</strong>
+                          <p className={styles.timelineDetail}>{activeReleaseLaneExitStrategy.helper}</p>
+                          <div className={styles.nextStepActions}>
+                            <button className={styles.button} type="button" onClick={handleReleaseLaneExitStrategy}>
+                              {activeReleaseLaneExitStrategy.actionLabel}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}

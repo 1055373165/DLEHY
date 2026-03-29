@@ -1388,10 +1388,10 @@ describe("Workspace page", () => {
       screen.getByText(/当前章已经完成这轮放行动作；这条放行 lane 已收口，下一步切到 第 2 章 · Chapter Two，继续 1 章最后观察。/)
     ).toBeInTheDocument();
     expect(screen.getByText("放行 lane 退出策略")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "切到最后观察 lane" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "切到最后观察 lane" }).length).toBeGreaterThan(1);
     expect(
-      screen.getByText(/当前 release-ready lane 已收口，下一步切到 第 2 章 · Chapter Two 继续最后观察。/)
-    ).toBeInTheDocument();
+      screen.getAllByText(/当前 release-ready lane 已收口，下一步切到 第 2 章 · Chapter Two 继续最后观察。/).length
+    ).toBeGreaterThan(1);
     expect(screen.getByText("放行链完成态")).toBeInTheDocument();
     expect(screen.getByText("这条放行链本轮已收口")).toBeInTheDocument();
     expect(
@@ -1412,6 +1412,11 @@ describe("Workspace page", () => {
     expect(screen.getAllByText("当前阶段 · 已转入最后观察收尾").length).toBeGreaterThan(0);
     expect(screen.getByText("Release-ready 批处理")).toBeInTheDocument();
     expect(screen.getAllByText("已完成放行 1 / 1 章 · 待观察 1 章").length).toBeGreaterThan(1);
+    expect(screen.getByText("本轮建议")).toBeInTheDocument();
+    expect(screen.getAllByText("切到最后观察 lane").length).toBeGreaterThan(1);
+    expect(
+      screen.getAllByText(/当前 release-ready lane 已收口，下一步切到 第 2 章 · Chapter Two 继续最后观察。/).length
+    ).toBeGreaterThan(1);
     expect(screen.getByRole("button", { name: /第 3 章 · Chapter Three/ })).toHaveTextContent(
       "放行链反馈 · 切到最后观察 lane"
     );
@@ -1425,7 +1430,7 @@ describe("Workspace page", () => {
       "批处理摘要 · 放行 1 / 1 · 观察 1"
     );
 
-    await user.click(screen.getByRole("button", { name: "切到最后观察 lane" }));
+    await user.click(screen.getAllByRole("button", { name: "切到最后观察 lane" })[0]);
 
     await waitFor(() => {
       expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");
