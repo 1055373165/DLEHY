@@ -1680,18 +1680,24 @@ export function WorkspacePage() {
                             {entryOutcome.statusLabel} · {entryOutcome.reasonLabel}
                           </p>
                           {recentOperatorChange?.chapterId === entry.chapter_id &&
-                          selectedReviewChapterId === entry.chapter_id &&
-                          selectedChapterConvergenceItems.length ? (
+                          selectedReviewChapterId === entry.chapter_id ? (
                             <>
-                              <p className={styles.queueDeltaHint}>
-                                {selectedChapterConvergenceItems
-                                  .slice(0, 2)
-                                  .map((item) => item.value)
-                                  .join(" · ")}
-                              </p>
+                              {selectedChapterConvergenceItems.length ? (
+                                <p className={styles.queueDeltaHint}>
+                                  {selectedChapterConvergenceItems
+                                    .slice(0, 2)
+                                    .map((item) => item.value)
+                                    .join(" · ")}
+                                </p>
+                              ) : null}
                               {selectedQueueOutcome ? (
                                 <p className={styles.queueOutcomeHint}>
                                   {selectedQueueOutcome.chainLabel} · {selectedQueueOutcome.statusLabel}
+                                </p>
+                              ) : null}
+                              {activeQueueLens?.outcome === "release-ready" && activeReleaseLaneExitStrategy ? (
+                                <p className={styles.queueOutcomeHint}>
+                                  放行链反馈 · {activeReleaseLaneExitStrategy.statusLabel}
                                 </p>
                               ) : null}
                             </>
