@@ -1403,13 +1403,15 @@ describe("Workspace page", () => {
       screen.getByText(/当前 release-ready lane 已经没有下一条可直接放行章节，当前批处理转入 第 2 章 · Chapter Two 的最后观察收尾。/)
     ).toBeInTheDocument();
     expect(screen.getByText("放行批处理摘要")).toBeInTheDocument();
-    expect(screen.getByText("已完成放行 1 / 1 章 · 待观察 1 章")).toBeInTheDocument();
+    expect(screen.getAllByText("已完成放行 1 / 1 章 · 待观察 1 章").length).toBeGreaterThan(0);
     expect(
-      screen.getByText(/这一轮批处理已经完成当前 release-ready lane 的 1 章放行；下一步回到 1 章最后观察收尾。/)
-    ).toBeInTheDocument();
+      screen.getAllByText(/这一轮批处理已经完成当前 release-ready lane 的 1 章放行；下一步回到 1 章最后观察收尾。/).length
+    ).toBeGreaterThan(0);
     expect(screen.getByText("Lane 摘要")).toBeInTheDocument();
     expect(screen.getAllByText("批处理摘要 · 放行 1 / 1 · 观察 1").length).toBeGreaterThan(0);
-    expect(screen.getByText("当前阶段 · 已转入最后观察收尾")).toBeInTheDocument();
+    expect(screen.getAllByText("当前阶段 · 已转入最后观察收尾").length).toBeGreaterThan(0);
+    expect(screen.getByText("Release-ready 批处理")).toBeInTheDocument();
+    expect(screen.getAllByText("已完成放行 1 / 1 章 · 待观察 1 章").length).toBeGreaterThan(1);
     expect(screen.getByRole("button", { name: /第 3 章 · Chapter Three/ })).toHaveTextContent(
       "放行链反馈 · 切到最后观察 lane"
     );

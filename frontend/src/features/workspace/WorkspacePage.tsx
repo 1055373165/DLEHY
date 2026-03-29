@@ -453,6 +453,10 @@ export function WorkspacePage() {
           observeCount: queueObserveCount,
         })
       : null;
+  const showReleaseLaneSessionDigest =
+    isFlowMode &&
+    activeQueueLens?.outcome === "release-ready" &&
+    Boolean(activeReleaseLaneBatchDigest || activeReleaseLaneBatchPhase);
   const releaseLaneFallback =
     isFlowMode && activeQueueLens?.outcome === "release-ready" && !visibleQueueEntries.length
       ? buildReleaseLaneFallback(queueEntries)
@@ -2219,7 +2223,7 @@ export function WorkspacePage() {
                   </section>
                 ) : null}
 
-                {isFlowMode && sessionDigest ? (
+                {isFlowMode && (sessionDigest || showReleaseLaneSessionDigest) ? (
                   <div className={styles.sessionDigest}>
                     <div className={styles.reviewSectionHeader}>
                       <div>
@@ -2231,21 +2235,39 @@ export function WorkspacePage() {
                       </p>
                     </div>
                     <div className={styles.sessionDigestGrid}>
-                      <div className={styles.sessionDigestCard}>
-                        <span className={styles.deltaLabel}>已处理章节</span>
-                        <strong className={styles.deltaValue}>{formatNumber(sessionDigest.processedCount)} 章</strong>
-                        <p className={styles.timelineDetail}>{sessionDigest.kindSummary.join(" · ")}</p>
-                      </div>
-                      <div className={styles.sessionDigestCard}>
-                        <span className={styles.deltaLabel}>最近主链</span>
-                        <strong className={styles.sessionTrailChain}>{sessionDigest.latestChainLabel}</strong>
-                        <p className={styles.timelineDetail}>{sessionDigest.latestChapterLabel}</p>
-                      </div>
-                      <div className={styles.sessionDigestCard}>
-                        <span className={styles.deltaLabel}>连续处理提示</span>
-                        <strong className={styles.deltaValue}>继续沿最近链路推进</strong>
-                        <p className={styles.timelineDetail}>{sessionDigest.continuityHint}</p>
-                      </div>
+                      {sessionDigest ? (
+                        <>
+                          <div className={styles.sessionDigestCard}>
+                            <span className={styles.deltaLabel}>已处理章节</span>
+                            <strong className={styles.deltaValue}>{formatNumber(sessionDigest.processedCount)} 章</strong>
+                            <p className={styles.timelineDetail}>{sessionDigest.kindSummary.join(" · ")}</p>
+                          </div>
+                          <div className={styles.sessionDigestCard}>
+                            <span className={styles.deltaLabel}>最近主链</span>
+                            <strong className={styles.sessionTrailChain}>{sessionDigest.latestChainLabel}</strong>
+                            <p className={styles.timelineDetail}>{sessionDigest.latestChapterLabel}</p>
+                          </div>
+                          <div className={styles.sessionDigestCard}>
+                            <span className={styles.deltaLabel}>连续处理提示</span>
+                            <strong className={styles.deltaValue}>继续沿最近链路推进</strong>
+                            <p className={styles.timelineDetail}>{sessionDigest.continuityHint}</p>
+                          </div>
+                        </>
+                      ) : null}
+                      {showReleaseLaneSessionDigest ? (
+                        <div className={styles.sessionDigestCard}>
+                          <span className={styles.deltaLabel}>Release-ready 批处理</span>
+                          <strong className={styles.deltaValue}>
+                            {activeReleaseLaneBatchDigest?.statusLabel ?? activeReleaseLaneBatchPhase?.statusLabel}
+                          </strong>
+                          <p className={styles.timelineDetail}>
+                            {activeReleaseLaneBatchDigest?.helper ?? activeReleaseLaneBatchPhase?.helper}
+                          </p>
+                          {activeReleaseLaneBatchPhase ? (
+                            <p className={styles.queueDeltaHint}>当前阶段 · {activeReleaseLaneBatchPhase.queueHint}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
