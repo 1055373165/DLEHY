@@ -1387,8 +1387,13 @@ describe("Workspace page", () => {
     expect(
       screen.getByText(/当前章已经完成这轮放行动作；这条放行 lane 已收口，下一步切到 第 2 章 · Chapter Two，继续 1 章最后观察。/)
     ).toBeInTheDocument();
+    expect(screen.getByText("放行 lane 退出策略")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切到最后观察 lane" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/当前 release-ready lane 已收口，下一步切到 第 2 章 · Chapter Two 继续最后观察。/)
+    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "放行后看最后观察" }));
+    await user.click(screen.getByRole("button", { name: "切到最后观察 lane" }));
 
     await waitFor(() => {
       expect((screen.getByLabelText("当前章节") as HTMLSelectElement).value).toBe("ch-2");

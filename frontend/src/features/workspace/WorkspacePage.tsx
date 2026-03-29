@@ -155,6 +155,12 @@ type ReleaseLaneContinuationFeedback = {
   statusLabel: string;
   helper: string;
 };
+type ReleaseLaneExitStrategy = {
+  statusLabel: string;
+  helper: string;
+  actionLabel: string;
+  actionKind: "observe-current" | "observe-fallback" | "next-release" | "reset";
+};
 type QueueLensPreset = {
   key: string;
   label: string;
@@ -383,6 +389,17 @@ export function WorkspacePage() {
           visibleCount: visibleQueueEntries.length,
           selectedIndex: selectedQueueIndex,
           observeCount: queueObserveCount,
+          nextQueueEntry,
+          observeFallback: releaseLaneObserveFallback,
+        })
+      : null;
+  const activeReleaseLaneExitStrategy =
+    isFlowMode &&
+    activeQueueLens?.outcome === "release-ready" &&
+    selectedChapterRecentChange &&
+    selectedQueueOutcome
+      ? buildReleaseLaneExitStrategy({
+          statusLabel: selectedQueueOutcome.statusLabel,
           nextQueueEntry,
           observeFallback: releaseLaneObserveFallback,
         })
@@ -942,6 +959,41 @@ export function WorkspacePage() {
     selectReviewChapter(releaseLaneObserveFallback.chapterId);
   }
 
+  function handleReleaseLaneExitStrategy() {
+    if (!activeReleaseLaneExitStrategy) {
+      return;
+    }
+    if (activeReleaseLaneExitStrategy.actionKind === "next-release") {
+      handleAdvanceToNextChapter();
+      return;
+    }
+    if (activeReleaseLaneExitStrategy.actionKind === "observe-fallback") {
+      handleInspectReleaseObserveLane();
+      return;
+    }
+    if (activeReleaseLaneExitStrategy.actionKind === "observe-current") {
+      setQueueOutcomeFilter("observe");
+      const observePriority = currentChapterReviewDetail
+        ? buildFocusedPriorityItems(currentChapterReviewDetail, selectedQueueEntry)[0] ?? null
+        : null;
+      if (observePriority) {
+        handleFocusCurrentChapterPriority(observePriority);
+      } else {
+        setTimelineFocus(null);
+      }
+      setReviewMessage({
+        tone: "success",
+        text: "当前章已退回继续观察 lane，先留在本章把 blocker / proposal / open issues 收口。",
+      });
+      return;
+    }
+    handleResetQueueLens();
+    setReviewMessage({
+      tone: "success",
+      text: "当前 release-ready lane 已收口，可以回到整条队列继续扫描其他章节。",
+    });
+  }
+
   return (
     <div className={styles.grid}>
       <div className={styles.summaryStack}>
@@ -1444,6 +1496,18 @@ export function WorkspacePage() {
                                 {activeReleaseLaneContinuationFeedback.statusLabel}
                               </strong>
                               <p className={styles.timelineDetail}>{activeReleaseLaneContinuationFeedback.helper}</p>
+                            </div>
+                          ) : null}
+                          {activeReleaseLaneExitStrategy ? (
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>放行 lane 退出策略</span>
+                              <strong className={styles.deltaValue}>{activeReleaseLaneExitStrategy.statusLabel}</strong>
+                              <p className={styles.timelineDetail}>{activeReleaseLaneExitStrategy.helper}</p>
+                              <div className={styles.nextStepActions}>
+                                <button className={styles.button} type="button" onClick={handleReleaseLaneExitStrategy}>
+                                  {activeReleaseLaneExitStrategy.actionLabel}
+                                </button>
+                              </div>
                             </div>
                           ) : null}
                           {activeReleaseGate ? (
@@ -3262,6 +3326,48 @@ function buildReleaseLaneContinuationFeedback(input: {
             input.observeCount
           )} 章最后观察。`
         : "当前章已经完成这轮放行动作；这条放行 lane 和最后观察 lane 都已收口，可以回到整条队列继续扫描。",
+  };
+}
+
+function buildReleaseLaneExitStrategy(input: {
+  statusLabel: string;
+  nextQueueEntry: {
+    ordinal: number;
+    title_src?: string | null;
+  } | null;
+  observeFallback: ReleaseLaneFallback | null;
+}): ReleaseLaneExitStrategy {
+  if (input.statusLabel !== "适合放行") {
+    return {
+      statusLabel: "当前章退回继续观察",
+      helper: "这次 operator 动作把当前章拉回观察 lane，下一步先留在本章把最后一个 blocker / proposal / open issue 收口。",
+      actionLabel: "切到继续观察 lane",
+      actionKind: "observe-current",
+    };
+  }
+  if (input.nextQueueEntry) {
+    return {
+      statusLabel: "继续下一条放行候选",
+      helper: `当前章已经完成放行动作，下一步直接接力第 ${input.nextQueueEntry.ordinal} 章 · ${
+        input.nextQueueEntry.title_src || `Chapter ${input.nextQueueEntry.ordinal}`
+      }。`,
+      actionLabel: "继续下一条放行候选",
+      actionKind: "next-release",
+    };
+  }
+  if (input.observeFallback) {
+    return {
+      statusLabel: "切到最后观察 lane",
+      helper: `当前 release-ready lane 已收口，下一步切到 ${input.observeFallback.chapterLabel} 继续最后观察。`,
+      actionLabel: "切到最后观察 lane",
+      actionKind: "observe-fallback",
+    };
+  }
+  return {
+    statusLabel: "回到整条队列",
+    helper: "当前 release-ready lane 和最后观察 lane 都已收口，下一步回到整条队列继续扫描。",
+    actionLabel: "回到整条队列",
+    actionKind: "reset",
   };
 }
 
