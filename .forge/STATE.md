@@ -1,11 +1,11 @@
 # Forge State
 
-last_update_time: 2026-03-30 14:30:26 +0800
+last_update_time: 2026-03-30 15:03:13 +0800
 mode: resume
-current_step: batch-7_verified
-active_batch: batch-7
-authoritative_batch_contract: .forge/batches/batch-7.md
-expected_report_path: .forge/reports/batch-7-report.md
+current_step: batch-8_verified
+active_batch: batch-8
+authoritative_batch_contract: .forge/batches/batch-8.md
+expected_report_path: .forge/reports/batch-8-report.md
 
 active_worker_slot:
 - worker_id: none
@@ -27,6 +27,7 @@ completed_items:
 - Forge batch-5 is verified complete: route-first release-ready decisions now sit inside the Operator Lens entry layer, so reviewers can act at lane entry instead of after reading mid-page cards.
 - Forge batch-6 is verified complete: route-first release-ready decisions now sit in a pre-entry cue before the lane is actually selected, reducing wrong-lane scans.
 - Forge batch-7 is verified complete: route-first release-ready decisions now influence Operator Lens choice itself, so reviewers can pick the right lane before entering subqueue-level handling.
+- Forge batch-8 is verified complete: release-ready route-first guidance now appears in Active Scope / Session Digest summaries, so reviewers can judge lane worthiness before reaching Operator Lens controls.
 
 failed_items:
 - none recorded in the current handoff state
@@ -42,6 +43,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/batches/batch-5.md
 - /Users/smy/project/book-agent/.forge/batches/batch-6.md
 - /Users/smy/project/book-agent/.forge/batches/batch-7.md
+- /Users/smy/project/book-agent/.forge/batches/batch-8.md
 - /Users/smy/project/book-agent/.forge/log.md
 - /Users/smy/project/book-agent/.forge/reports/batch-1-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-2-report.md
@@ -50,6 +52,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/reports/batch-5-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-6-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-7-report.md
+- /Users/smy/project/book-agent/.forge/reports/batch-8-report.md
 - /Users/smy/project/book-agent/docs/mainline-progress.md
 - /Users/smy/project/book-agent/frontend/src/features/workspace/WorkspacePage.tsx
 - /Users/smy/project/book-agent/frontend/src/features/workspace/WorkspacePage.test.tsx
@@ -64,4 +67,4 @@ handoff_source:
 - /Users/smy/project/book-agent/progress.txt
 
 next_mainline_focus:
-- Lift release-ready lens-choice guidance into queue / session summary surfaces, so reviewer/operator can judge whether a lane is worth entering before reaching the Operator Lens controls.
+- Turn the new high-level release-ready summary guidance into a stronger queue / session route cue, so reviewer/operator can decide whether to keep scrolling toward Operator Lens or stop and switch direction earlier.

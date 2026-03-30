@@ -1658,6 +1658,20 @@ export function WorkspacePage() {
                     ) : (
                       <p className={styles.timelineDetail}>当前未启用过滤，适合做整条队列扫描。</p>
                     )}
+                    {activeReleaseLaneLensChoiceCue ? (
+                      <div className={styles.nextStepCard}>
+                        <span className={styles.deltaLabel}>Lens 选择建议</span>
+                        <strong className={styles.deltaValue}>{activeReleaseLaneLensChoiceCue.statusLabel}</strong>
+                        <p className={styles.timelineDetail}>{activeReleaseLaneLensChoiceCue.helper}</p>
+                        <div className={styles.filterChipRow}>
+                          {activeReleaseLaneLensChoiceCue.chips.map((chip) => (
+                            <span key={chip} className={styles.filterChip}>
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {activeQueueLens?.outcome === "release-ready" &&
                     (activeReleaseLanePressure ||
                       activeReleaseLaneBatchDigest ||
@@ -2716,7 +2730,7 @@ export function WorkspacePage() {
                   </section>
                 ) : null}
 
-                {isFlowMode && (sessionDigest || showReleaseLaneSessionDigest) ? (
+                {isFlowMode && (sessionDigest || showReleaseLaneSessionDigest || activeReleaseLaneLensChoiceCue) ? (
                   <div className={styles.sessionDigest}>
                     <div className={styles.reviewSectionHeader}>
                       <div>
@@ -2746,6 +2760,13 @@ export function WorkspacePage() {
                             <p className={styles.timelineDetail}>{sessionDigest.continuityHint}</p>
                           </div>
                         </>
+                      ) : null}
+                      {activeReleaseLaneLensChoiceCue ? (
+                        <div className={styles.sessionDigestCard}>
+                          <span className={styles.deltaLabel}>Session 入口建议</span>
+                          <strong className={styles.deltaValue}>{activeReleaseLaneLensChoiceCue.statusLabel}</strong>
+                          <p className={styles.timelineDetail}>{activeReleaseLaneLensChoiceCue.helper}</p>
+                        </div>
                       ) : null}
                       {showReleaseLaneSessionDigest ? (
                         <div className={styles.sessionDigestCard}>
