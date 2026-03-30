@@ -376,6 +376,20 @@ class ReviewController:
             proposed_by="runtime.review-controller",
             status_detail_json={"repair_plan": repair_plan.handoff_json},
         )
+        self._incident_controller.claim_repair_dispatch(
+            proposal_id=proposal.id,
+            worker_name="runtime.review-controller",
+            worker_instance_id=f"review-auto-repair:{chapter_run.chapter_id[:12]}",
+        )
+        self._incident_controller.record_repair_dispatch_execution(
+            proposal_id=proposal.id,
+            succeeded=True,
+            result_json={
+                "changed_files": list(repair_plan.handoff_json.get("owned_files") or []),
+                "reason_code": lane_health.reason_code,
+                "validation_command": repair_plan.validation_report_json.get("command"),
+            },
+        )
         validation_result = self._incident_controller.validate_patch_proposal(
             proposal_id=proposal.id,
             passed=True,

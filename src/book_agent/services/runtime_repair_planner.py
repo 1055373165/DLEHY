@@ -81,6 +81,12 @@ class RuntimeRepairPlannerService:
                 "manifest_json": manifest_json,
                 "rollout_scope_json": rollout_scope_json,
             },
+            "dispatch": {
+                "claim_mode": "runtime_owned",
+                "claim_target": "runtime_patch_proposal",
+                "lane": "runtime.repair",
+                "worker_hint": "review_deadlock_repair_agent",
+            },
             "replay": {
                 "scope_type": "chapter",
                 "scope_id": chapter_id,
@@ -164,6 +170,12 @@ class RuntimeRepairPlannerService:
                 "revision_name": revision_name,
                 "manifest_json": manifest_json,
                 "rollout_scope_json": rollout_scope_json,
+            },
+            "dispatch": {
+                "claim_mode": "runtime_owned",
+                "claim_target": "runtime_patch_proposal",
+                "lane": "runtime.repair",
+                "worker_hint": "export_routing_repair_agent",
             },
             "replay": {
                 "scope_type": "export",

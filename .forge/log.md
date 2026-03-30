@@ -61,3 +61,7 @@
 - 2026-03-30 16:33:12 +0800 | executed batch-14 locally in main checkout; no extra worktree or batch fork created
 - 2026-03-30 16:33:12 +0800 | verified batch-14 with unittest (8 tests OK) and py_compile (passed)
 - 2026-03-30 16:33:12 +0800 | wrote .forge/reports/batch-14-report.md and advanced STATE.md to current_step=batch-14_verified
+- 2026-03-30 21:37:13 +0800 | froze batch-15: turn structured repair plans into runtime-owned repair dispatch / execution lineage on proposals and incidents
+- 2026-03-30 21:37:13 +0800 | executed batch-15 locally in main checkout; no extra worktree or batch fork created
+- 2026-03-30 21:37:13 +0800 | verified batch-15 with unittest (9 tests OK) and py_compile (passed)
+- 2026-03-30 21:37:13 +0800 | wrote .forge/reports/batch-15-report.md and advanced STATE.md to current_step=batch-15_verified

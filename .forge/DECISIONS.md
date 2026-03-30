@@ -18,9 +18,12 @@
   - `src/book_agent/app/runtime/controllers/incident_controller.py`
   - `src/book_agent/app/runtime/controllers/export_controller.py`
   - `src/book_agent/app/runtime/controllers/review_controller.py`
+  - `src/book_agent/services/run_execution.py`
+  - `src/book_agent/infra/repositories/run_control.py`
   - `tests/test_runtime_repair_planner.py`
   - `tests/test_export_controller.py`
   - `tests/test_incident_controller.py`
+  - `tests/test_run_execution.py`
   - `docs/mainline-progress.md`
 - Expand only if blocked by a real dependency.
 
@@ -30,5 +33,5 @@
   - `.venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py`
 
 6. Immediate next-slice decision
-- The next dependency-closed slice is `repair dispatch lineage`.
-- Goal: keep the new structured repair plan, but turn it into a runtime-owned dispatch/execution lineage that a future repair agent can claim and complete deterministically.
+- The next dependency-closed slice is `repair work-item dispatch`.
+- Goal: keep the new structured repair plan plus proposal-level repair dispatch, then bind it to a claimable `REPAIR` lane / execution surface that a future repair agent can deterministically pick up.

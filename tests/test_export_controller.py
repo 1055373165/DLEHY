@@ -199,6 +199,22 @@ class ExportControllerTests(unittest.TestCase):
                 scope_id,
             )
             self.assertEqual(
+                proposal.status_detail_json["repair_dispatch"]["status"],
+                "executed",
+            )
+            self.assertEqual(
+                proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
+                "passed",
+            )
+            self.assertEqual(
+                proposal.status_detail_json["repair_dispatch"]["bundle_publication"]["published_revision_id"],
+                recovery.bundle_revision_id,
+            )
+            self.assertEqual(
                 incident.status_detail_json["latest_patch_proposal"]["repair_plan"]["bundle"]["revision_name"],
                 f"export-routing-fix-{recovery.route_evidence_json.get('route_fingerprint', scope_id)[:12]}",
+            )
+            self.assertEqual(
+                incident.status_detail_json["repair_dispatch"]["last_result"]["status"],
+                "succeeded",
             )

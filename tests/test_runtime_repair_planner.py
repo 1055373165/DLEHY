@@ -19,6 +19,8 @@ class RuntimeRepairPlannerTests(unittest.TestCase):
         self.assertEqual(plan.handoff_json["incident_kind"], "review_deadlock")
         self.assertEqual(plan.handoff_json["replay"]["scope_type"], "chapter")
         self.assertEqual(plan.handoff_json["replay"]["boundary"], "review_session")
+        self.assertEqual(plan.handoff_json["dispatch"]["claim_mode"], "runtime_owned")
+        self.assertEqual(plan.handoff_json["dispatch"]["claim_target"], "runtime_patch_proposal")
         self.assertEqual(plan.validation_report_json["scope"], "review_deadlock")
         self.assertIn("review_controller.py", " ".join(plan.handoff_json["owned_files"]))
 
@@ -38,6 +40,8 @@ class RuntimeRepairPlannerTests(unittest.TestCase):
         self.assertEqual(plan.handoff_json["incident_kind"], "export_misrouting")
         self.assertEqual(plan.handoff_json["replay"]["scope_type"], "export")
         self.assertEqual(plan.handoff_json["replay"]["scope_id"], "export-scope-1")
+        self.assertEqual(plan.handoff_json["dispatch"]["lane"], "runtime.repair")
+        self.assertEqual(plan.handoff_json["dispatch"]["worker_hint"], "export_routing_repair_agent")
         self.assertEqual(plan.validation_report_json["scope"], "export_misrouting")
         self.assertIn("export_routing.py", " ".join(plan.handoff_json["owned_files"]))
 

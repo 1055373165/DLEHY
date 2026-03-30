@@ -1,11 +1,11 @@
 # Forge State
 
-last_update_time: 2026-03-30 16:33:12 +0800
+last_update_time: 2026-03-30 21:37:13 +0800
 mode: resume
-current_step: batch-14_verified
-active_batch: batch-14
-authoritative_batch_contract: .forge/batches/batch-14.md
-expected_report_path: .forge/reports/batch-14-report.md
+current_step: batch-15_verified
+active_batch: batch-15
+authoritative_batch_contract: .forge/batches/batch-15.md
+expected_report_path: .forge/reports/batch-15-report.md
 
 active_worker_slot:
 - worker_id: none
@@ -34,6 +34,7 @@ completed_items:
 - Forge batch-12 is verified complete: the top-level lane go/no-go card now replaces multiple summary chips with a single compact summary line, so queue/session decisions rely on fewer visual layers.
 - Forge batch-13 is verified complete: when the top-level lane go/no-go card exists, duplicate Lens/Session entry suggestion cards now collapse away, so queue/session level route trust depends on one primary cue instead of several similar cards.
 - Forge batch-14 is verified complete: runtime incidents now generate structured repair plans that capture owned files, validation, bundle rollout, and replay scope, so self-heal execution can move from hardcoded controller actions toward runtime-owned repair dispatch.
+- Forge batch-15 is verified complete: runtime patch proposals now seed repair dispatch lineage and the review/export self-heal flows claim, execute, validate, and publish through that lineage, so repair execution is no longer implied by controller code alone.
 
 failed_items:
 - none recorded in the current handoff state
@@ -56,6 +57,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/batches/batch-12.md
 - /Users/smy/project/book-agent/.forge/batches/batch-13.md
 - /Users/smy/project/book-agent/.forge/batches/batch-14.md
+- /Users/smy/project/book-agent/.forge/batches/batch-15.md
 - /Users/smy/project/book-agent/.forge/log.md
 - /Users/smy/project/book-agent/.forge/reports/batch-1-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-2-report.md
@@ -71,6 +73,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/reports/batch-12-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-13-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-14-report.md
+- /Users/smy/project/book-agent/.forge/reports/batch-15-report.md
 - /Users/smy/project/book-agent/docs/mainline-progress.md
 - /Users/smy/project/book-agent/src/book_agent/services/runtime_repair_planner.py
 - /Users/smy/project/book-agent/src/book_agent/app/runtime/controllers/incident_controller.py
@@ -82,7 +85,7 @@ working_tree_scope:
 
 last_verified_test_baseline:
 - command: .venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal
-  result: Ran 8 tests, OK
+  result: Ran 9 tests, OK
 - command: .venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py
   result: passed
 
@@ -90,4 +93,4 @@ handoff_source:
 - /Users/smy/project/book-agent/progress.txt
 
 next_mainline_focus:
-- Turn structured repair plans into runtime-owned repair dispatch / execution lineage, so the self-heal loop can progress from planning to actual repair-lane ownership.
+- Bind the new runtime-owned repair dispatch lineage to a claimable REPAIR execution lane / work-item surface, so a future repair agent can pick up and complete repair tasks deterministically.

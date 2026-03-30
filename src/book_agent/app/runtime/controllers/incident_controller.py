@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -66,19 +67,103 @@ class IncidentController:
             created_at=now,
             updated_at=now,
         )
+        self._session.add(proposal)
+        self._session.flush()
+        repair_plan = dict((status_detail_json or {}).get("repair_plan") or {})
+        repair_dispatch = (
+            self._seed_repair_dispatch(
+                incident_id=incident.id,
+                proposal_id=proposal.id,
+                patch_surface=patch_surface,
+                repair_plan=repair_plan,
+            )
+            if repair_plan
+            else None
+        )
+        proposal.status_detail_json = {
+            **dict(proposal.status_detail_json or {}),
+            **({"repair_dispatch": repair_dispatch} if repair_dispatch is not None else {}),
+        }
         incident.status = RuntimeIncidentStatus.PATCH_PROPOSED
         incident.status_detail_json = {
             **dict(incident.status_detail_json or {}),
             "latest_patch_proposal": {
+                "proposal_id": proposal.id,
                 "patch_surface": patch_surface,
                 "proposed_by": proposed_by,
-                "repair_plan": dict((status_detail_json or {}).get("repair_plan") or {}),
+                "repair_plan": repair_plan,
+                "repair_dispatch": dict(repair_dispatch or {}),
             },
+            **({"repair_dispatch": dict(repair_dispatch)} if repair_dispatch is not None else {}),
         }
         incident.updated_at = now
         self._session.add_all([proposal, incident])
         self._session.flush()
         return proposal
+
+    def claim_repair_dispatch(
+        self,
+        *,
+        proposal_id: str,
+        worker_name: str,
+        worker_instance_id: str,
+    ) -> dict[str, Any]:
+        proposal = self._runtime_repo.get_runtime_patch_proposal(proposal_id)
+        incident = self._runtime_repo.get_runtime_incident(proposal.incident_id)
+        dispatch = self._get_repair_dispatch(proposal)
+        now = _utcnow()
+        execution = {
+            "execution_id": str(uuid4()),
+            "worker_name": worker_name,
+            "worker_instance_id": worker_instance_id,
+            "claimed_at": now.isoformat(),
+            "status": "running",
+        }
+        dispatch["status"] = "claimed"
+        dispatch["attempt_count"] = int(dispatch.get("attempt_count", 0) or 0) + 1
+        dispatch["claimed_by"] = {
+            "worker_name": worker_name,
+            "worker_instance_id": worker_instance_id,
+        }
+        dispatch["last_claimed_at"] = now.isoformat()
+        dispatch["current_execution"] = execution
+        self._persist_repair_dispatch(proposal=proposal, incident=incident, dispatch=dispatch, now=now)
+        return dict(dispatch)
+
+    def record_repair_dispatch_execution(
+        self,
+        *,
+        proposal_id: str,
+        succeeded: bool,
+        result_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        proposal = self._runtime_repo.get_runtime_patch_proposal(proposal_id)
+        incident = self._runtime_repo.get_runtime_incident(proposal.incident_id)
+        dispatch = self._get_repair_dispatch(proposal)
+        current_execution = dict(dispatch.get("current_execution") or {})
+        if not current_execution:
+            raise ValueError(f"Repair dispatch has not been claimed: {proposal_id}")
+
+        now = _utcnow()
+        execution_record = {
+            **current_execution,
+            "completed_at": now.isoformat(),
+            "status": "succeeded" if succeeded else "failed",
+            "result_json": dict(result_json or {}),
+        }
+        history = [
+            dict(entry)
+            for entry in list(dispatch.get("execution_history") or [])
+            if isinstance(entry, dict)
+        ]
+        history.append(execution_record)
+        dispatch["status"] = "executed" if succeeded else "failed"
+        dispatch["current_execution"] = None
+        dispatch["execution_history"] = history
+        dispatch["last_result"] = execution_record
+        dispatch["last_completed_at"] = now.isoformat()
+        self._persist_repair_dispatch(proposal=proposal, incident=incident, dispatch=dispatch, now=now)
+        return dict(dispatch)
 
     def validate_patch_proposal(
         self,
@@ -106,6 +191,13 @@ class IncidentController:
             **dict(incident.status_detail_json or {}),
             "validation": result.report_json,
         }
+        dispatch = dict((proposal.status_detail_json or {}).get("repair_dispatch") or {})
+        if dispatch:
+            dispatch["validation"] = {
+                "status": "passed" if passed else "failed",
+                "report_json": result.report_json,
+            }
+            self._persist_repair_dispatch(proposal=proposal, incident=incident, dispatch=dispatch, now=_utcnow())
         incident.updated_at = _utcnow()
         self._session.add(incident)
         self._session.flush()
@@ -196,10 +288,76 @@ class IncidentController:
             **dict(proposal.status_detail_json or {}),
             "bound_work_item_ids": bound_work_items,
         }
+        dispatch = dict((proposal.status_detail_json or {}).get("repair_dispatch") or {})
+        if dispatch:
+            dispatch["bundle_publication"] = {
+                "published_revision_id": bundle_record.revision.id,
+                "effective_revision_id": effective_bundle_record.revision.id,
+                "rollback_performed": bundle_guard.rollback_performed,
+                "bound_work_item_ids": bound_work_items,
+            }
+            self._persist_repair_dispatch(proposal=proposal, incident=incident, dispatch=dispatch, now=now)
 
         self._session.add_all([proposal, incident])
         self._session.flush()
         return bundle_record
+
+    def _seed_repair_dispatch(
+        self,
+        *,
+        incident_id: str,
+        proposal_id: str,
+        patch_surface: str,
+        repair_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "dispatch_id": str(uuid4()),
+            "status": "pending",
+            "claim_mode": str((repair_plan.get("dispatch") or {}).get("claim_mode") or "runtime_owned"),
+            "lane": str((repair_plan.get("dispatch") or {}).get("lane") or "runtime.repair"),
+            "proposal_id": proposal_id,
+            "incident_id": incident_id,
+            "patch_surface": patch_surface,
+            "attempt_count": 0,
+            "owned_files": list(repair_plan.get("owned_files") or []),
+            "validation_command": str((repair_plan.get("validation") or {}).get("command") or ""),
+            "bundle_revision_name": str((repair_plan.get("bundle") or {}).get("revision_name") or ""),
+            "rollout_scope_json": dict((repair_plan.get("bundle") or {}).get("rollout_scope_json") or {}),
+            "replay": dict(repair_plan.get("replay") or {}),
+            "current_execution": None,
+            "execution_history": [],
+        }
+
+    def _get_repair_dispatch(self, proposal: RuntimePatchProposal) -> dict[str, Any]:
+        dispatch = dict((proposal.status_detail_json or {}).get("repair_dispatch") or {})
+        if not dispatch:
+            raise ValueError(f"Repair dispatch is not available for proposal: {proposal.id}")
+        return dispatch
+
+    def _persist_repair_dispatch(
+        self,
+        *,
+        proposal: RuntimePatchProposal,
+        incident,
+        dispatch: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        proposal.status_detail_json = {
+            **dict(proposal.status_detail_json or {}),
+            "repair_dispatch": dict(dispatch),
+        }
+        proposal.updated_at = now
+
+        incident_detail = dict(incident.status_detail_json or {})
+        latest_patch = dict(incident_detail.get("latest_patch_proposal") or {})
+        latest_patch["repair_dispatch"] = dict(dispatch)
+        incident_detail["latest_patch_proposal"] = latest_patch
+        incident_detail["repair_dispatch"] = dict(dispatch)
+        incident.status_detail_json = incident_detail
+        incident.updated_at = now
+
+        self._session.add_all([proposal, incident])
+        self._session.flush()
 
     def _bind_retryable_scope_work_items(
         self,

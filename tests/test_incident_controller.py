@@ -41,6 +41,7 @@ from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.infra.repositories.runtime_resources import RuntimeResourcesRepository
 from book_agent.services.runtime_bundle import RuntimeBundleService
 from book_agent.services.runtime_patch_validation import RuntimePatchValidationService
+from book_agent.services.runtime_repair_planner import RuntimeRepairPlannerService
 
 
 class IncidentControllerTests(unittest.TestCase):
@@ -171,6 +172,95 @@ class IncidentControllerTests(unittest.TestCase):
             self.assertEqual(proposal.status.value, "published")
             self.assertEqual(proposal.published_bundle_revision_id, bundle_record.revision.id)
             self.assertEqual(incident.status.value, "published")
+            self.assertEqual(run.runtime_bundle_revision_id, bundle_record.revision.id)
+            self.assertEqual(work_item.runtime_bundle_revision_id, bundle_record.revision.id)
+
+    def test_repair_dispatch_lineage_can_be_claimed_executed_and_published(self) -> None:
+        run_id, incident_id, work_item_id, packet_scope_id = self._seed_run_incident_and_work_item()
+
+        with self.session_factory() as session:
+            bundle_service = RuntimeBundleService(session, settings=self._settings())
+            validation_service = RuntimePatchValidationService(session)
+            controller = IncidentController(
+                session=session,
+                bundle_service=bundle_service,
+                validation_service=validation_service,
+            )
+            repair_plan = RuntimeRepairPlannerService().plan_export_misrouting_repair(
+                scope_id=packet_scope_id,
+                export_type="rebuilt_pdf",
+                corrected_route="epub.rebuilt_pdf_via_html",
+                route_candidates=["epub.rebuilt_pdf_via_html"],
+                route_evidence_json={"route_fingerprint": f"dispatch-{packet_scope_id}", "source_type": "epub"},
+            )
+            proposal = controller.open_patch_proposal(
+                incident_id=incident_id,
+                patch_surface=repair_plan.patch_surface,
+                diff_manifest_json=repair_plan.diff_manifest_json,
+                status_detail_json={"repair_plan": repair_plan.handoff_json},
+            )
+
+            claimed = controller.claim_repair_dispatch(
+                proposal_id=proposal.id,
+                worker_name="runtime.repair-agent",
+                worker_instance_id="repair-worker-1",
+            )
+            self.assertEqual(claimed["status"], "claimed")
+            self.assertEqual(claimed["attempt_count"], 1)
+
+            executed = controller.record_repair_dispatch_execution(
+                proposal_id=proposal.id,
+                succeeded=True,
+                result_json={"changed_files": repair_plan.handoff_json["owned_files"]},
+            )
+            self.assertEqual(executed["status"], "executed")
+            self.assertEqual(executed["execution_history"][0]["status"], "succeeded")
+
+            validation_result = controller.validate_patch_proposal(
+                proposal_id=proposal.id,
+                passed=True,
+                report_json=repair_plan.validation_report_json,
+            )
+            self.assertTrue(validation_result.passed)
+
+            bundle_record = controller.publish_validated_patch(
+                proposal_id=proposal.id,
+                revision_name=repair_plan.revision_name,
+                manifest_json=repair_plan.manifest_json,
+                rollout_scope_json=repair_plan.rollout_scope_json,
+            )
+            session.commit()
+
+        with self.session_factory() as session:
+            proposal = session.get(RuntimePatchProposal, proposal.id)
+            incident = session.get(RuntimeIncident, incident_id)
+            run = session.get(DocumentRun, run_id)
+            work_item = session.get(WorkItem, work_item_id)
+
+            self.assertIsNotNone(proposal)
+            self.assertIsNotNone(incident)
+            self.assertIsNotNone(run)
+            self.assertIsNotNone(work_item)
+            assert proposal is not None and incident is not None and run is not None and work_item is not None
+
+            self.assertEqual(proposal.status.value, "published")
+            self.assertEqual(proposal.status_detail_json["repair_dispatch"]["status"], "executed")
+            self.assertEqual(
+                proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
+                "passed",
+            )
+            self.assertEqual(
+                proposal.status_detail_json["repair_dispatch"]["bundle_publication"]["published_revision_id"],
+                bundle_record.revision.id,
+            )
+            self.assertEqual(
+                incident.status_detail_json["repair_dispatch"]["last_result"]["status"],
+                "succeeded",
+            )
+            self.assertEqual(
+                incident.status_detail_json["latest_patch_proposal"]["repair_dispatch"]["proposal_id"],
+                proposal.id,
+            )
             self.assertEqual(run.runtime_bundle_revision_id, bundle_record.revision.id)
             self.assertEqual(work_item.runtime_bundle_revision_id, bundle_record.revision.id)
 
@@ -417,8 +507,20 @@ class IncidentControllerTests(unittest.TestCase):
             chapter.id,
         )
         self.assertEqual(
+            proposal.status_detail_json["repair_dispatch"]["status"],
+            "executed",
+        )
+        self.assertEqual(
+            proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
+            "passed",
+        )
+        self.assertEqual(
             incident.status_detail_json["latest_patch_proposal"]["repair_plan"]["replay"]["boundary"],
             "review_session",
+        )
+        self.assertEqual(
+            incident.status_detail_json["repair_dispatch"]["last_result"]["status"],
+            "succeeded",
         )
 
 
