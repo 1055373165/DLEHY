@@ -1379,6 +1379,11 @@ describe("Workspace page", () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByText("可直放 1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("待观察 1").length).toBeGreaterThan(0);
+    expect(screen.getByText("Lane Health")).toBeInTheDocument();
+    expect(screen.getAllByText("临界收尾").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/当前这条 lane 仍有 release-ready 价值，但已经进入收尾窗口，适合在最后一条放行候选与观察 backlog 之间快速切换。/).length
+    ).toBeGreaterThan(0);
     expect(screen.getByText("Lane 把握度")).toBeInTheDocument();
     expect(screen.getAllByText("放行把握度临界").length).toBeGreaterThan(0);
     expect(
@@ -1396,6 +1401,8 @@ describe("Workspace page", () => {
     ).toBeGreaterThan(0);
     expect(screen.getByText("Operator 放行把握度")).toBeInTheDocument();
     expect(screen.getAllByText("放行把握度临界").length).toBeGreaterThan(1);
+    expect(screen.getByText("Operator Lane Health")).toBeInTheDocument();
+    expect(screen.getAllByText("临界收尾").length).toBeGreaterThan(1);
     expect(screen.getByText("Operator 漂移趋势")).toBeInTheDocument();
     expect(screen.getAllByText("正在逼近切换点").length).toBeGreaterThan(1);
     expect(screen.getByText("Operator 压力建议")).toBeInTheDocument();
@@ -1462,6 +1469,8 @@ describe("Workspace page", () => {
     expect(screen.getAllByText("已完成放行 1 / 1 章 · 待观察 1 章").length).toBeGreaterThan(1);
     expect(screen.getByText("Release-ready 去留判断")).toBeInTheDocument();
     expect(screen.getAllByText("观察 backlog 优先").length).toBeGreaterThan(0);
+    expect(screen.getByText("Release-ready Lane Health")).toBeInTheDocument();
+    expect(screen.getAllByText("临界收尾").length).toBeGreaterThan(1);
     expect(screen.getByText("Release-ready 把握度")).toBeInTheDocument();
     expect(screen.getAllByText("放行把握度临界").length).toBeGreaterThan(1);
     expect(screen.getByText("Release-ready 漂移趋势")).toBeInTheDocument();

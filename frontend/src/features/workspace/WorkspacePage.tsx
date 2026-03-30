@@ -186,6 +186,11 @@ type ReleaseLaneConfidence = {
   helper: string;
   chips: string[];
 };
+type ReleaseLaneHealthSummary = {
+  statusLabel: string;
+  helper: string;
+  chips: string[];
+};
 type ReleaseLaneDrift = {
   statusLabel: string;
   helper: string;
@@ -511,6 +516,18 @@ export function WorkspacePage() {
       ? buildReleaseLanePressureAction({
           visibleCount: visibleQueueEntries.length,
           observeCount: activeReleaseLaneObserveCount,
+        })
+      : null;
+  const activeReleaseLaneHealthSummary =
+    isFlowMode &&
+    activeQueueLens?.outcome === "release-ready" &&
+    activeReleaseLanePressureAction &&
+    activeReleaseLaneConfidence &&
+    activeReleaseLaneDrift
+      ? buildReleaseLaneHealthSummary({
+          pressureActionKind: activeReleaseLanePressureAction.actionKind,
+          confidenceStatus: activeReleaseLaneConfidence.statusLabel,
+          driftStatus: activeReleaseLaneDrift.statusLabel,
         })
       : null;
   const showReleaseLaneSessionDigest =
@@ -1549,6 +1566,22 @@ export function WorkspacePage() {
                             </div>
                           </div>
                         ) : null}
+                        {activeReleaseLaneHealthSummary ? (
+                          <div className={styles.deltaCard}>
+                            <span className={styles.deltaLabel}>Lane Health</span>
+                            <strong className={styles.deltaValue}>
+                              {activeReleaseLaneHealthSummary.statusLabel}
+                            </strong>
+                            <p className={styles.timelineDetail}>{activeReleaseLaneHealthSummary.helper}</p>
+                            <div className={styles.filterChipRow}>
+                              {activeReleaseLaneHealthSummary.chips.map((chip) => (
+                                <span key={chip} className={styles.filterChip}>
+                                  {chip}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                         {activeReleaseLaneConfidence ? (
                           <div className={styles.deltaCard}>
                             <span className={styles.deltaLabel}>Lane 把握度</span>
@@ -1743,6 +1776,15 @@ export function WorkspacePage() {
                               <span className={styles.deltaLabel}>批量放行反馈</span>
                               <strong className={styles.deltaValue}>{activeReleaseLaneBatchSummary.statusLabel}</strong>
                               <p className={styles.timelineDetail}>{activeReleaseLaneBatchSummary.helper}</p>
+                            </div>
+                          ) : null}
+                          {activeReleaseLaneHealthSummary ? (
+                            <div className={styles.deltaCard}>
+                              <span className={styles.deltaLabel}>Operator Lane Health</span>
+                              <strong className={styles.deltaValue}>
+                                {activeReleaseLaneHealthSummary.statusLabel}
+                              </strong>
+                              <p className={styles.timelineDetail}>{activeReleaseLaneHealthSummary.helper}</p>
                             </div>
                           ) : null}
                           {activeReleaseLaneConfidence ? (
@@ -2483,6 +2525,13 @@ export function WorkspacePage() {
                           {activeReleaseLaneBatchPhase ? (
                             <p className={styles.queueDeltaHint}>当前阶段 · {activeReleaseLaneBatchPhase.queueHint}</p>
                           ) : null}
+                        </div>
+                      ) : null}
+                      {showReleaseLaneSessionDigest && activeReleaseLaneHealthSummary ? (
+                        <div className={styles.sessionDigestCard}>
+                          <span className={styles.deltaLabel}>Release-ready Lane Health</span>
+                          <strong className={styles.deltaValue}>{activeReleaseLaneHealthSummary.statusLabel}</strong>
+                          <p className={styles.timelineDetail}>{activeReleaseLaneHealthSummary.helper}</p>
                         </div>
                       ) : null}
                       {showReleaseLaneSessionDigest && activeReleaseLanePressureAction ? (
@@ -3950,6 +3999,52 @@ function buildReleaseLaneConfidence(input: {
     helper: `当前 scope 仍有 ${formatNumber(input.visibleCount)} 章可直放，同时观察 backlog 还有 ${formatNumber(
       input.observeCount
     )} 章；这条 lane 还值得继续推进，但已经需要开始关注收尾切换。`,
+    chips,
+  };
+}
+
+function buildReleaseLaneHealthSummary(input: {
+  pressureActionKind: ReleaseLanePressureAction["actionKind"];
+  confidenceStatus: string;
+  driftStatus: string;
+}): ReleaseLaneHealthSummary {
+  const chips = [
+    `去留 · ${input.pressureActionKind}`,
+    `把握度 · ${input.confidenceStatus}`,
+    `漂移 · ${input.driftStatus}`,
+  ];
+  if (input.pressureActionKind === "reset" || input.driftStatus === "已回退到观察链") {
+    return {
+      statusLabel: "需要切回观察修正",
+      helper: "当前这条 lane 已经不再是稳定的 release-ready 批处理，应该优先回到观察链或整条队列重新分诊。",
+      chips,
+    };
+  }
+  if (
+    input.pressureActionKind === "switch-observe" ||
+    input.confidenceStatus === "放行把握度临界" ||
+    input.driftStatus === "正在逼近切换点"
+  ) {
+    return {
+      statusLabel: "临界收尾",
+      helper: "当前这条 lane 仍有 release-ready 价值，但已经进入收尾窗口，适合在最后一条放行候选与观察 backlog 之间快速切换。",
+      chips,
+    };
+  }
+  if (
+    input.confidenceStatus === "放行把握度很高" ||
+    input.confidenceStatus === "放行把握度高" ||
+    input.driftStatus === "持续变稳"
+  ) {
+    return {
+      statusLabel: "健康可冲",
+      helper: "当前这条 lane 具备稳定推进 release-ready 的条件，reviewer 可以把它当成高质量的连续放行工作面。",
+      chips,
+    };
+  }
+  return {
+    statusLabel: "稳态推进",
+    helper: "当前这条 lane 仍值得继续推进，但已经需要留意下一步是否转入最后观察收尾。",
     chips,
   };
 }

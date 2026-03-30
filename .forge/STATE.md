@@ -1,8 +1,8 @@
 # Forge State
 
-last_update_time: 2026-03-30 11:17:36 +0800
+last_update_time: 2026-03-30 12:07:48 +0800
 mode: resume
-current_step: ready_for_dispatch
+current_step: batch-1_verified
 active_batch: batch-1
 authoritative_batch_contract: .forge/batches/batch-1.md
 expected_report_path: .forge/reports/batch-1-report.md
@@ -20,6 +20,7 @@ completed_items:
 - Memory Governance proposal-first / review-commit / explicit override loop is complete enough for product use.
 - Chapter Workbench already supports focused / flow / release-ready operator modes.
 - release-ready lane now exposes pressure suggestion, stay-or-switch judgment, confidence, and drift across queue rail / Operator Lens / Session Digest.
+- Forge batch-1 is verified complete: release-ready lane now also exposes a higher-level lane health summary across queue rail / Operator Lens / Session Digest.
 
 failed_items:
 - none recorded in the current handoff state
@@ -44,4 +45,4 @@ handoff_source:
 - /Users/smy/project/book-agent/progress.txt
 
 next_mainline_focus:
-- Consolidate release-ready lane pressure / confidence / drift into a clearer lane health readout without reopening unrelated product surfaces.
+- Make release-ready lane health the stronger top-line routing cue, so reviewer/operator can decide faster without scanning every supporting card.

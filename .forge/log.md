@@ -5,3 +5,6 @@
 - 2026-03-30 11:17:36 +0800 | set mode=resume, current_step=ready_for_dispatch, active_batch=batch-1
 - 2026-03-30 11:17:36 +0800 | recorded verified frontend baseline: vitest 16 passed, frontend build passed
 - 2026-03-30 11:17:36 +0800 | next batch frozen: release-ready lane health summary on WorkspacePage.tsx / WorkspacePage.test.tsx / docs/mainline-progress.md
+- 2026-03-30 12:07:48 +0800 | executed batch-1 locally in main checkout; no extra worktree or batch fork created
+- 2026-03-30 12:07:48 +0800 | verified batch-1 with vitest (16 passed) and frontend build (passed)
+- 2026-03-30 12:07:48 +0800 | wrote .forge/reports/batch-1-report.md and advanced STATE.md to current_step=batch-1_verified

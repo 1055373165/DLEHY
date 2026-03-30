@@ -1,5 +1,5 @@
 Book Agent Mainline Handoff
-Last Updated: 2026-03-30 11:17:36 +0800
+Last Updated: 2026-03-30 12:07:48 +0800
 
 1. 高层需求
 
@@ -75,6 +75,7 @@ Last Updated: 2026-03-30 11:17:36 +0800
 - release-ready 的去留判断已经上提到 Operator Lens 和 Session Digest，reviewer 进入该视角后无需先滚进 detail。
 - release-ready 的放行把握度已经上提到 queue rail / Operator Lens / Session Digest。
 - release-ready 的漂移趋势已经上提到 queue rail / Operator Lens / Session Digest，reviewer 现在能看出这条 lane 是在变稳、稳定推进、逼近切换点，还是退回观察链。
+- release-ready 的 lane health 汇总已经落地，reviewer 现在可以直接把一条 lane 判断成“健康可冲 / 临界收尾 / 需要切回观察修正”。
 
 5. 最近一次验证基线
 
@@ -102,16 +103,17 @@ Reviewer / Operator 工作台主线收敛阶段
 
 7. 建议交给 Forge 的下一刀
 
-下一批最自然的主线不是再加一个零散卡片，而是把当前 release-ready 的多个判断信号收成更高一级的 lane health：
+batch-1 已经完成。下一批最自然的主线，不是再回去补零散卡片，而是把已经落地的 lane health 更进一步变成真正的主导判断：
 
 - 目标：
-  把 pressure / confidence / drift 三层判断汇总成一个更直接的 lane health 读数。
+  让 release-ready 的 lane health 成为 queue rail / Operator Lens / Session Digest 上更强的主导判断，而不只是新增一张摘要卡。
 
 - 期望效果：
-  reviewer 在 release-ready 视角里一眼就能知道这条 lane 当前是：
+  reviewer 在 release-ready 视角里，不用再扫多张卡，就能先读出：
   - 健康可冲
   - 临界收尾
   - 需要切回观察修正
+  然后再决定是否继续推进、切回观察 backlog、或回整条队列。
 
 - 建议范围：
   - frontend/src/features/workspace/WorkspacePage.tsx
