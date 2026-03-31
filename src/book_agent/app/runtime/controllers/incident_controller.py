@@ -392,6 +392,11 @@ class IncidentController:
             "lane": str((repair_plan.get("dispatch") or {}).get("lane") or "runtime.repair"),
             "worker_hint": str((repair_plan.get("dispatch") or {}).get("worker_hint") or ""),
             "worker_contract_version": int((repair_plan.get("dispatch") or {}).get("worker_contract_version") or 1),
+            "execution_mode": str((repair_plan.get("dispatch") or {}).get("execution_mode") or "in_process"),
+            "executor_hint": str((repair_plan.get("dispatch") or {}).get("executor_hint") or "python_repair_executor"),
+            "executor_contract_version": int(
+                (repair_plan.get("dispatch") or {}).get("executor_contract_version") or 1
+            ),
             "proposal_id": proposal_id,
             "incident_id": incident_id,
             "patch_surface": patch_surface,

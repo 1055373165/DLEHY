@@ -163,6 +163,9 @@ class RunExecutionService:
             "dispatch_lane": repair_dispatch_json.get("lane"),
             "worker_hint": repair_dispatch_json.get("worker_hint"),
             "worker_contract_version": int(repair_dispatch_json.get("worker_contract_version") or 1),
+            "execution_mode": repair_dispatch_json.get("execution_mode"),
+            "executor_hint": repair_dispatch_json.get("executor_hint"),
+            "executor_contract_version": int(repair_dispatch_json.get("executor_contract_version") or 1),
         }
         work_item_ids = self.ensure_scope_replay_work_items(
             run_id=run_id,

@@ -38,13 +38,15 @@ class ExportControllerTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
         self.bundle_root = Path(self.tempdir.name) / "runtime-bundles"
-        self.engine = build_engine("sqlite+pysqlite:///:memory:")
+        self.database_path = Path(self.tempdir.name) / "export-controller.sqlite"
+        self.database_url = f"sqlite+pysqlite:///{self.database_path}"
+        self.engine = build_engine(self.database_url)
         Base.metadata.create_all(self.engine)
         self.session_factory = build_session_factory(engine=self.engine)
 
     def _settings(self) -> Settings:
         return Settings(
-            database_url="sqlite+pysqlite:///:memory:",
+            database_url=self.database_url,
             runtime_bundle_root=self.bundle_root,
         )
 
@@ -239,6 +241,14 @@ class ExportControllerTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(
+                repair_work_item.input_version_bundle_json["execution_mode"],
+                "agent_backed",
+            )
+            self.assertEqual(
+                repair_work_item.input_version_bundle_json["executor_hint"],
+                "python_subprocess_repair_executor",
+            )
+            self.assertEqual(
                 proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
                 "passed",
             )
@@ -257,4 +267,12 @@ class ExportControllerTests(unittest.TestCase):
             self.assertEqual(
                 incident.status_detail_json["repair_dispatch"]["last_result"]["result_json"]["repair_agent_adapter_name"],
                 "export_routing_in_process_repair_agent",
+            )
+            self.assertEqual(
+                incident.status_detail_json["repair_dispatch"]["last_result"]["result_json"]["repair_executor_execution_mode"],
+                "agent_backed",
+            )
+            self.assertEqual(
+                incident.status_detail_json["repair_dispatch"]["last_result"]["result_json"]["repair_executor_hint"],
+                "python_subprocess_repair_executor",
             )

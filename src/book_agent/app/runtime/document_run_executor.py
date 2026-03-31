@@ -44,6 +44,7 @@ from book_agent.orchestrator.state_machine import (
 )
 from book_agent.services.run_control import RunControlService
 from book_agent.services.run_execution import ClaimedRunWorkItem, RunExecutionService
+from book_agent.services.runtime_repair_executor import RuntimeRepairExecutorRegistry
 from book_agent.services.runtime_repair_registry import RuntimeRepairWorkerRegistry
 from book_agent.services.export_routing import ExportRoutingError
 from book_agent.services.workflows import DocumentWorkflowService
@@ -165,6 +166,7 @@ class DocumentRunExecutor:
         self.default_max_blocker_repair_rounds = max(1, int(default_max_blocker_repair_rounds))
         self.default_max_parallel_workers = max(1, int(default_max_parallel_workers))
         self._runtime_repair_registry = RuntimeRepairWorkerRegistry(session_factory=session_factory)
+        self._runtime_repair_executor_registry = RuntimeRepairExecutorRegistry(session_factory=session_factory)
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._supervisor_thread: threading.Thread | None = None
@@ -815,19 +817,24 @@ class DocumentRunExecutor:
     def _execute_repair_work_item(self, run_id: str, claimed: ClaimedRunWorkItem) -> None:
         input_bundle = self._load_work_item_input_bundle(claimed.work_item_id)
         repair_agent = None
+        repair_executor = None
 
         def _prepare_repair_execution() -> dict[str, Any]:
-            nonlocal repair_agent
+            nonlocal repair_agent, repair_executor
             repair_agent = self._runtime_repair_registry.resolve_for_input_bundle(input_bundle)
-            return repair_agent.prepare_execution(
+            repair_executor = self._runtime_repair_executor_registry.resolve_for_input_bundle(
+                input_bundle=input_bundle,
+                repair_agent=repair_agent,
+            )
+            return repair_executor.prepare_execution(
                 claimed=claimed,
                 input_bundle=input_bundle,
             )
 
         def _complete_repair_execution(payload: dict[str, Any], lease_token: str) -> None:
-            if repair_agent is None:
-                raise RuntimeError("Repair agent was not resolved before completion.")
-            repair_agent.complete_execution(
+            if repair_executor is None:
+                raise RuntimeError("Repair executor was not resolved before completion.")
+            repair_executor.complete_execution(
                 run_id=run_id,
                 payload=payload,
                 lease_token=lease_token,

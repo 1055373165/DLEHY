@@ -87,6 +87,9 @@ class RuntimeRepairPlannerService:
                 "lane": "runtime.repair",
                 "worker_hint": "review_deadlock_repair_agent",
                 "worker_contract_version": 1,
+                "execution_mode": "in_process",
+                "executor_hint": "python_repair_executor",
+                "executor_contract_version": 1,
             },
             "replay": {
                 "scope_type": "chapter",
@@ -178,6 +181,9 @@ class RuntimeRepairPlannerService:
                 "lane": "runtime.repair",
                 "worker_hint": "export_routing_repair_agent",
                 "worker_contract_version": 1,
+                "execution_mode": "agent_backed",
+                "executor_hint": "python_subprocess_repair_executor",
+                "executor_contract_version": 1,
             },
             "replay": {
                 "scope_type": "export",

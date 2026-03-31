@@ -22,6 +22,9 @@ class RuntimeRepairPlannerTests(unittest.TestCase):
         self.assertEqual(plan.handoff_json["dispatch"]["claim_mode"], "runtime_owned")
         self.assertEqual(plan.handoff_json["dispatch"]["claim_target"], "runtime_patch_proposal")
         self.assertEqual(plan.handoff_json["dispatch"]["worker_contract_version"], 1)
+        self.assertEqual(plan.handoff_json["dispatch"]["execution_mode"], "in_process")
+        self.assertEqual(plan.handoff_json["dispatch"]["executor_hint"], "python_repair_executor")
+        self.assertEqual(plan.handoff_json["dispatch"]["executor_contract_version"], 1)
         self.assertEqual(plan.validation_report_json["scope"], "review_deadlock")
         self.assertIn("review_controller.py", " ".join(plan.handoff_json["owned_files"]))
 
@@ -44,6 +47,9 @@ class RuntimeRepairPlannerTests(unittest.TestCase):
         self.assertEqual(plan.handoff_json["dispatch"]["lane"], "runtime.repair")
         self.assertEqual(plan.handoff_json["dispatch"]["worker_hint"], "export_routing_repair_agent")
         self.assertEqual(plan.handoff_json["dispatch"]["worker_contract_version"], 1)
+        self.assertEqual(plan.handoff_json["dispatch"]["execution_mode"], "agent_backed")
+        self.assertEqual(plan.handoff_json["dispatch"]["executor_hint"], "python_subprocess_repair_executor")
+        self.assertEqual(plan.handoff_json["dispatch"]["executor_contract_version"], 1)
         self.assertEqual(plan.validation_report_json["scope"], "export_misrouting")
         self.assertIn("export_routing.py", " ".join(plan.handoff_json["owned_files"]))
 
