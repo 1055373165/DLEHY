@@ -83,3 +83,7 @@
 - 2026-03-31 15:43:13 +0800 | executed batch-19 locally in main checkout; no extra worktree or batch fork created
 - 2026-03-31 15:43:13 +0800 | verified batch-19 with unittest (15 tests OK) and py_compile (passed)
 - 2026-03-31 15:43:13 +0800 | wrote .forge/reports/batch-19-report.md and advanced STATE.md to current_step=batch-19_verified
+- 2026-03-31 15:50:51 +0800 | froze batch-20: turn registry selection into genuinely distinct repair worker implementations for review deadlock and export misrouting
+- 2026-03-31 15:50:51 +0800 | executed batch-20 locally in main checkout; no extra worktree or batch fork created
+- 2026-03-31 15:50:51 +0800 | verified batch-20 with unittest (15 tests OK) and py_compile (passed)
+- 2026-03-31 15:50:51 +0800 | wrote .forge/reports/batch-20-report.md and advanced STATE.md to current_step=batch-20_verified

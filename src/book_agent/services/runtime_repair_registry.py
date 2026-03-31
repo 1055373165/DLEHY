@@ -5,7 +5,11 @@ from typing import Any
 
 from sqlalchemy.orm import sessionmaker
 
-from book_agent.services.runtime_repair_worker import RuntimeRepairWorker
+from book_agent.services.runtime_repair_worker import (
+    ExportRoutingRepairWorker,
+    ReviewDeadlockRepairWorker,
+    RuntimeRepairWorker,
+)
 
 RuntimeRepairWorkerFactory = Callable[[sessionmaker], RuntimeRepairWorker]
 
@@ -74,10 +78,18 @@ class RuntimeRepairWorkerRegistry:
     def _default_registrations(cls) -> dict[tuple[str, int], RuntimeRepairWorkerFactory]:
         return {
             (cls.DEFAULT_WORKER_HINT, cls.DEFAULT_WORKER_CONTRACT_VERSION): cls._runtime_repair_worker_factory,
-            ("review_deadlock_repair_agent", 1): cls._runtime_repair_worker_factory,
-            ("export_routing_repair_agent", 1): cls._runtime_repair_worker_factory,
+            ("review_deadlock_repair_agent", 1): cls._review_deadlock_repair_worker_factory,
+            ("export_routing_repair_agent", 1): cls._export_routing_repair_worker_factory,
         }
 
     @staticmethod
     def _runtime_repair_worker_factory(session_factory: sessionmaker) -> RuntimeRepairWorker:
         return RuntimeRepairWorker(session_factory=session_factory)
+
+    @staticmethod
+    def _review_deadlock_repair_worker_factory(session_factory: sessionmaker) -> RuntimeRepairWorker:
+        return ReviewDeadlockRepairWorker(session_factory=session_factory)
+
+    @staticmethod
+    def _export_routing_repair_worker_factory(session_factory: sessionmaker) -> RuntimeRepairWorker:
+        return ExportRoutingRepairWorker(session_factory=session_factory)

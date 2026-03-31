@@ -1,5 +1,5 @@
 Book Agent Mainline Handoff
-Last Updated: 2026-03-31 15:43:13 +0800
+Last Updated: 2026-03-31 15:50:51 +0800
 
 1. 高层需求
 
@@ -110,7 +110,11 @@ Last Updated: 2026-03-31 15:43:13 +0800
 - 在这次推进后，又进一步补上了显式 repair worker registry
   - runtime 现在会按 `worker_hint / worker_contract_version` 解析 repair worker，而不是在 executor 里直接写死 `RuntimeRepairWorker`
   - unknown worker hint / unsupported contract version 会通过 repair work-item failure lifecycle 落成确定性的 terminal failure，不再绕过 lane 审计
-- 这意味着当前已经从“只有 repair plan”推进到“runtime 自己持有 repair dispatch / execution lineage + 可领取 repair work-item surface + executor-owned repair lane + 明确 repair worker contract + 显式 repair worker registry”
+- 在这次推进后，又进一步把 registry 变成了真正不同的 repair worker 实现
+  - `review_deadlock_repair_agent` 现在解析到 `ReviewDeadlockRepairWorker`
+  - `export_routing_repair_agent` 现在解析到 `ExportRoutingRepairWorker`
+  - 这些 worker 还会显式拒绝不属于自己的 incident kind，避免 hint/version 只是名义分流
+- 这意味着当前已经从“只有 repair plan”推进到“runtime 自己持有 repair dispatch / execution lineage + 可领取 repair work-item surface + executor-owned repair lane + 明确 repair worker contract + 显式 repair worker registry + genuinely distinct repair worker implementations”
 
 5. 最近一次验证基线
 
@@ -132,14 +136,14 @@ runtime self-heal 当前验证结果：
 
 Runtime Self-Heal 主线收敛阶段
 
-当前最重要的，是把 runtime incident + repair worker registry 继续推进成真正可驱动独立 repair agent 的执行闭环，而不是继续加前端 lane 说明卡。
+当前最重要的，是把 runtime incident + distinct repair worker registry 继续推进成真正可驱动独立 repair agent 的执行闭环，而不是继续加前端 lane 说明卡。
 
 7. 建议交给 Forge 的下一刀
 
-batch-1 到 batch-19 已经完成。下一批最自然的主线，不是继续增加前端 lane 卡片，而是把 repair worker registry 继续推进成真正可插拔的 runtime repair agent lane：
+batch-1 到 batch-20 已经完成。下一批最自然的主线，不是继续增加前端 lane 卡片，而是把 repair worker registry 继续推进成真正可插拔的 runtime repair agent lane：
 
 - 目标：
-  让 runtime 从“registry 里仍然统一落到同一个本地 RuntimeRepairWorker”继续走到“独立 repair agent / repair lane worker 可按 worker hint 与 contract version 被选中并领取 repair work-item”，为真正的自修复执行器做准备。
+  让 runtime 从“registry 已经能解析到不同本地 repair worker”继续走到“独立 repair agent / repair lane worker 可按 worker hint 与 contract version 被选中并领取 repair work-item”，为真正的自修复执行器做准备。
 
 - 期望效果：
   incident 不只是记录问题、提案和 dispatch lineage，而是能明确告诉系统：下一步由哪个 repair agent 领取、修哪类 surface、用什么验证、发布到哪条 rollout scope、回放哪一级失败任务。

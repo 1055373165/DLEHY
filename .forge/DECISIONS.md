@@ -41,5 +41,5 @@
   - `.venv/bin/python -m py_compile src/book_agent/services/runtime_repair_registry.py src/book_agent/services/runtime_repair_planner.py src/book_agent/services/runtime_repair_worker.py src/book_agent/services/run_execution.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py src/book_agent/app/runtime/document_run_executor.py src/book_agent/services/workflows.py tests/test_runtime_repair_registry.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py tests/test_req_mx_01_review_deadlock_self_heal.py tests/test_req_ex_02_export_misrouting_self_heal.py tests/test_run_execution.py`
 
 6. Immediate next-slice decision
-- The next dependency-closed slice is `distinct repair-agent implementations`.
-- Goal: keep the new registry deterministic, then let `worker_hint` / `worker_contract_version` route to genuinely separate repair workers or agent adapters instead of always resolving to the same in-process implementation.
+- The next dependency-closed slice is `independent repair-agent adapters`.
+- Goal: keep the new registry deterministic, then let `worker_hint` / `worker_contract_version` route to genuinely separate repair-agent adapters or executors instead of only different local worker classes.

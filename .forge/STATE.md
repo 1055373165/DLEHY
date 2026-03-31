@@ -1,11 +1,11 @@
 # Forge State
 
-last_update_time: 2026-03-31 15:43:13 +0800
+last_update_time: 2026-03-31 15:50:51 +0800
 mode: resume
-current_step: batch-19_verified
-active_batch: batch-19
-authoritative_batch_contract: .forge/batches/batch-19.md
-expected_report_path: .forge/reports/batch-19-report.md
+current_step: batch-20_verified
+active_batch: batch-20
+authoritative_batch_contract: .forge/batches/batch-20.md
+expected_report_path: .forge/reports/batch-20-report.md
 
 active_worker_slot:
 - worker_id: none
@@ -39,6 +39,7 @@ completed_items:
 - Forge batch-17 is verified complete: repair execution now runs through the executor-owned `REPAIR` lane end-to-end, so work-items only succeed after validate/publish/finalize, and both REQ-MX-01 and REQ-EX-02 prove the scheduled repair can be claimed, executed, and replayed after commit.
 - Forge batch-18 is verified complete: repair execution is now delegated through an explicit `RuntimeRepairWorker` plus work-item contract metadata, so the executor only orchestrates the lane and the next slice can focus on independent worker selection instead of untangling inline repair code.
 - Forge batch-19 is verified complete: repair work-items are now resolved through an explicit worker registry keyed by `worker_hint / worker_contract_version`, and unknown contracts fail deterministically through the repair lane instead of exploding outside the work-item lifecycle.
+- Forge batch-20 is verified complete: the registry now resolves genuinely distinct repair worker implementations for review deadlock and export misrouting, and each worker rejects unsupported incident kinds so hint/version routing is semantically enforced.
 
 failed_items:
 - none recorded in the current handoff state
@@ -66,6 +67,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/batches/batch-17.md
 - /Users/smy/project/book-agent/.forge/batches/batch-18.md
 - /Users/smy/project/book-agent/.forge/batches/batch-19.md
+- /Users/smy/project/book-agent/.forge/batches/batch-20.md
 - /Users/smy/project/book-agent/.forge/log.md
 - /Users/smy/project/book-agent/.forge/reports/batch-1-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-2-report.md
@@ -86,6 +88,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/reports/batch-17-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-18-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-19-report.md
+- /Users/smy/project/book-agent/.forge/reports/batch-20-report.md
 - /Users/smy/project/book-agent/docs/mainline-progress.md
 - /Users/smy/project/book-agent/src/book_agent/services/runtime_repair_planner.py
 - /Users/smy/project/book-agent/src/book_agent/services/runtime_repair_worker.py
@@ -114,4 +117,4 @@ handoff_source:
 - /Users/smy/project/book-agent/progress.txt
 
 next_mainline_focus:
-- Move the new repair worker registry toward truly distinct repair-agent implementations, so runtime self-heal can hand `REPAIR` work-items to independent workers instead of resolving every hint to the same in-process implementation.
+- Move from distinct in-process repair workers to independent repair-agent adapters or executors, so runtime self-heal can hand `REPAIR` work-items to genuinely separate repair agents instead of only different local classes.

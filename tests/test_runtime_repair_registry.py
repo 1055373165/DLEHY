@@ -6,7 +6,11 @@ from book_agent.services.runtime_repair_registry import (
     RuntimeRepairWorkerRegistry,
     UnsupportedRuntimeRepairWorkerError,
 )
-from book_agent.services.runtime_repair_worker import RuntimeRepairWorker
+from book_agent.services.runtime_repair_worker import (
+    ExportRoutingRepairWorker,
+    ReviewDeadlockRepairWorker,
+    RuntimeRepairWorker,
+)
 
 
 class RuntimeRepairWorkerRegistryTests(unittest.TestCase):
@@ -28,9 +32,10 @@ class RuntimeRepairWorkerRegistryTests(unittest.TestCase):
         )
         default_worker = registry.resolve_for_input_bundle({})
 
-        self.assertIsInstance(review_worker, RuntimeRepairWorker)
-        self.assertIsInstance(export_worker, RuntimeRepairWorker)
+        self.assertIsInstance(review_worker, ReviewDeadlockRepairWorker)
+        self.assertIsInstance(export_worker, ExportRoutingRepairWorker)
         self.assertIsInstance(default_worker, RuntimeRepairWorker)
+        self.assertNotEqual(type(review_worker), type(export_worker))
 
     def test_rejects_unknown_worker_hint(self) -> None:
         registry = RuntimeRepairWorkerRegistry(session_factory=self.session_factory)

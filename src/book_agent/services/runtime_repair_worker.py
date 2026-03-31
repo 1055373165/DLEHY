@@ -40,6 +40,10 @@ def _append_recovered_lineage(
     runtime_v2["recovered_lineage"] = existing_entries
 
 
+class UnsupportedRuntimeRepairIncidentError(RuntimeError):
+    """Raised when a repair worker is asked to execute an unsupported incident kind."""
+
+
 @dataclass(slots=True)
 class RuntimeRepairDispatchContract:
     proposal_id: str
@@ -107,6 +111,8 @@ class RuntimeRepairDispatchContract:
 
 
 class RuntimeRepairWorker:
+    SUPPORTED_INCIDENT_KINDS: frozenset[RuntimeIncidentKind] | None = None
+
     def __init__(self, *, session_factory: sessionmaker):
         self._session_factory = session_factory
 
@@ -131,6 +137,7 @@ class RuntimeRepairWorker:
             )
             proposal = RuntimeResourcesRepository(session).get_runtime_patch_proposal(contract.proposal_id)
             incident = RuntimeResourcesRepository(session).get_runtime_incident(proposal.incident_id)
+            self._assert_supported_incident_kind(incident.incident_kind)
             repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
             corrected_route = str(
                 (repair_plan.get("validation") or {}).get("corrected_route")
@@ -182,6 +189,7 @@ class RuntimeRepairWorker:
             runtime_repo = RuntimeResourcesRepository(session)
             proposal = runtime_repo.get_runtime_patch_proposal(contract.proposal_id)
             incident = runtime_repo.get_runtime_incident(proposal.incident_id)
+            self._assert_supported_incident_kind(incident.incident_kind)
             repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
             validation = controller.validate_patch_proposal(
                 proposal_id=contract.proposal_id,
@@ -248,6 +256,16 @@ class RuntimeRepairWorker:
                     **result_payload,
                 },
             )
+
+    def _assert_supported_incident_kind(self, incident_kind: RuntimeIncidentKind) -> None:
+        supported = self.SUPPORTED_INCIDENT_KINDS
+        if supported is None or incident_kind in supported:
+            return
+        supported_names = ", ".join(kind.value for kind in sorted(supported, key=lambda item: item.value))
+        raise UnsupportedRuntimeRepairIncidentError(
+            f"{self.__class__.__name__} does not support incident kind {incident_kind.value!r}. "
+            f"Supported kinds: {supported_names}."
+        )
 
     def _finalize_export_route_repair(
         self,
@@ -422,3 +440,11 @@ class RuntimeRepairWorker:
             },
             generation=int(chapter_run.generation or 1),
         )
+
+
+class ReviewDeadlockRepairWorker(RuntimeRepairWorker):
+    SUPPORTED_INCIDENT_KINDS = frozenset({RuntimeIncidentKind.REVIEW_DEADLOCK})
+
+
+class ExportRoutingRepairWorker(RuntimeRepairWorker):
+    SUPPORTED_INCIDENT_KINDS = frozenset({RuntimeIncidentKind.EXPORT_MISROUTING})
