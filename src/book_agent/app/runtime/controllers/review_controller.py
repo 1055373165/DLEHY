@@ -64,7 +64,8 @@ class ReviewSessionReconcileResult:
 class ReviewDeadlockRecoveryResult:
     incident_id: str
     proposal_id: str
-    bundle_revision_id: str
+    bundle_revision_id: str | None
+    repair_work_item_id: str
     replay_scope_id: str
     bound_work_item_ids: list[str]
     validation_report_json: dict[str, Any]
@@ -376,60 +377,19 @@ class ReviewController:
             proposed_by="runtime.review-controller",
             status_detail_json={"repair_plan": repair_plan.handoff_json},
         )
-        self._incident_controller.claim_repair_dispatch(
-            proposal_id=proposal.id,
-            worker_name="runtime.review-controller",
-            worker_instance_id=f"review-auto-repair:{chapter_run.chapter_id[:12]}",
-        )
-        self._incident_controller.record_repair_dispatch_execution(
-            proposal_id=proposal.id,
-            succeeded=True,
-            result_json={
-                "changed_files": list(repair_plan.handoff_json.get("owned_files") or []),
-                "reason_code": lane_health.reason_code,
-                "validation_command": repair_plan.validation_report_json.get("command"),
-            },
-        )
-        validation_result = self._incident_controller.validate_patch_proposal(
-            proposal_id=proposal.id,
-            passed=True,
-            report_json=repair_plan.validation_report_json,
-        )
-        replay_work_item_ids = RunExecutionService(RunControlRepository(self._session)).ensure_scope_replay_work_items(
-            run_id=chapter_run.run_id,
-            stage=WorkItemStage.REVIEW,
-            scope_type=WorkItemScopeType.CHAPTER,
-            scope_ids=[chapter_run.chapter_id],
-            input_version_bundle_by_scope_id={
-                chapter_run.chapter_id: {
-                    "document_id": chapter_run.document_id,
-                    "chapter_id": chapter_run.chapter_id,
-                    "chapter_run_id": chapter_run.id,
-                    "review_session_id": review_session.id,
-                }
-            },
-        )
-        bundle_record = self._incident_controller.publish_validated_patch(
-            proposal_id=proposal.id,
-            revision_name=repair_plan.revision_name,
-            manifest_json=repair_plan.manifest_json,
-            rollout_scope_json=repair_plan.rollout_scope_json,
-        )
         proposal = self._runtime_repo.get_runtime_patch_proposal(proposal.id)
-        bound_work_item_ids = [
-            str(work_item_id)
-            for work_item_id in list(dict(proposal.status_detail_json or {}).get("bound_work_item_ids") or [])
-            if str(work_item_id).strip()
-        ]
+        repair_dispatch = dict((proposal.status_detail_json or {}).get("repair_dispatch") or {})
         recovery_payload = {
             "incident_id": incident.id,
             "proposal_id": proposal.id,
-            "bundle_revision_id": bundle_record.revision.id,
+            "bundle_revision_id": None,
+            "repair_work_item_id": repair_dispatch.get("repair_work_item_id"),
             "replay_scope_id": chapter_run.chapter_id,
-            "replay_work_item_ids": replay_work_item_ids,
-            "bound_work_item_ids": bound_work_item_ids,
+            "replay_work_item_ids": [],
+            "bound_work_item_ids": [],
             "reason_code": lane_health.reason_code,
             "lane_health_state": lane_health.health_state,
+            "status": "scheduled",
         }
         self._runtime_repo.merge_review_session_status_detail(
             review_session.id,
@@ -447,8 +407,9 @@ class ReviewController:
                 "source": "runtime.review_deadlock",
                 "incident_id": incident.id,
                 "proposal_id": proposal.id,
-                "bundle_revision_id": bundle_record.revision.id,
                 "replay_scope_id": chapter_run.chapter_id,
+                "repair_work_item_id": repair_dispatch.get("repair_work_item_id"),
+                "status": "scheduled",
             },
         )
         self._runtime_repo.upsert_checkpoint(
@@ -460,15 +421,16 @@ class ReviewController:
                 "chapter_run_id": chapter_run.id,
                 "review_session_id": review_session.id,
                 "recovery": recovery_payload,
-                "validation_report": validation_result.report_json,
+                "validation_report": {},
             },
             generation=int(chapter_run.generation or 1),
         )
         return ReviewDeadlockRecoveryResult(
             incident_id=incident.id,
             proposal_id=proposal.id,
-            bundle_revision_id=bundle_record.revision.id,
+            bundle_revision_id=None,
+            repair_work_item_id=str(repair_dispatch.get("repair_work_item_id") or ""),
             replay_scope_id=chapter_run.chapter_id,
-            bound_work_item_ids=bound_work_item_ids,
-            validation_report_json=validation_result.report_json,
+            bound_work_item_ids=[],
+            validation_report_json={},
         )

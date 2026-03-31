@@ -1,11 +1,11 @@
 # Forge State
 
-last_update_time: 2026-03-31 14:34:12 +0800
+last_update_time: 2026-03-31 14:56:54 +0800
 mode: resume
-current_step: batch-16_verified
-active_batch: batch-16
-authoritative_batch_contract: .forge/batches/batch-16.md
-expected_report_path: .forge/reports/batch-16-report.md
+current_step: batch-17_verified
+active_batch: batch-17
+authoritative_batch_contract: .forge/batches/batch-17.md
+expected_report_path: .forge/reports/batch-17-report.md
 
 active_worker_slot:
 - worker_id: none
@@ -36,6 +36,7 @@ completed_items:
 - Forge batch-14 is verified complete: runtime incidents now generate structured repair plans that capture owned files, validation, bundle rollout, and replay scope, so self-heal execution can move from hardcoded controller actions toward runtime-owned repair dispatch.
 - Forge batch-15 is verified complete: runtime patch proposals now seed repair dispatch lineage and the review/export self-heal flows claim, execute, validate, and publish through that lineage, so repair execution is no longer implied by controller code alone.
 - Forge batch-16 is verified complete: runtime repair dispatch is now bound to a claimable `REPAIR` work-item lane, so proposal/incident repair lineage is no longer only JSON metadata and can be deterministically picked up by a future repair agent.
+- Forge batch-17 is verified complete: repair execution now runs through the executor-owned `REPAIR` lane end-to-end, so work-items only succeed after validate/publish/finalize, and both REQ-MX-01 and REQ-EX-02 prove the scheduled repair can be claimed, executed, and replayed after commit.
 
 failed_items:
 - none recorded in the current handoff state
@@ -60,6 +61,7 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/batches/batch-14.md
 - /Users/smy/project/book-agent/.forge/batches/batch-15.md
 - /Users/smy/project/book-agent/.forge/batches/batch-16.md
+- /Users/smy/project/book-agent/.forge/batches/batch-17.md
 - /Users/smy/project/book-agent/.forge/log.md
 - /Users/smy/project/book-agent/.forge/reports/batch-1-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-2-report.md
@@ -77,26 +79,30 @@ working_tree_scope:
 - /Users/smy/project/book-agent/.forge/reports/batch-14-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-15-report.md
 - /Users/smy/project/book-agent/.forge/reports/batch-16-report.md
+- /Users/smy/project/book-agent/.forge/reports/batch-17-report.md
 - /Users/smy/project/book-agent/docs/mainline-progress.md
 - /Users/smy/project/book-agent/src/book_agent/services/runtime_repair_planner.py
 - /Users/smy/project/book-agent/src/book_agent/services/run_execution.py
 - /Users/smy/project/book-agent/src/book_agent/app/runtime/controllers/incident_controller.py
 - /Users/smy/project/book-agent/src/book_agent/app/runtime/controllers/export_controller.py
 - /Users/smy/project/book-agent/src/book_agent/app/runtime/controllers/review_controller.py
+- /Users/smy/project/book-agent/src/book_agent/app/runtime/document_run_executor.py
+- /Users/smy/project/book-agent/src/book_agent/services/workflows.py
 - /Users/smy/project/book-agent/tests/test_runtime_repair_planner.py
 - /Users/smy/project/book-agent/tests/test_export_controller.py
 - /Users/smy/project/book-agent/tests/test_incident_controller.py
+- /Users/smy/project/book-agent/tests/test_req_ex_02_export_misrouting_self_heal.py
 - /Users/smy/project/book-agent/tests/test_run_execution.py
 - /Users/smy/project/book-agent/tests/test_req_mx_01_review_deadlock_self_heal.py
 
 last_verified_test_baseline:
-- command: .venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal tests.test_run_execution.RunExecutionServiceTests.test_ensure_repair_dispatch_work_item_seeds_claimable_repair_lane_once
-  result: Ran 10 tests, OK
-- command: .venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/services/run_execution.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py tests/test_run_execution.py tests/test_req_mx_01_review_deadlock_self_heal.py
+- command: .venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal tests.test_req_ex_02_export_misrouting_self_heal tests.test_run_execution.RunExecutionServiceTests.test_ensure_repair_dispatch_work_item_seeds_claimable_repair_lane_once
+  result: Ran 11 tests, OK
+- command: .venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/services/run_execution.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py src/book_agent/app/runtime/document_run_executor.py src/book_agent/services/workflows.py tests/test_export_controller.py tests/test_incident_controller.py tests/test_req_mx_01_review_deadlock_self_heal.py tests/test_req_ex_02_export_misrouting_self_heal.py tests/test_run_execution.py
   result: passed
 
 handoff_source:
 - /Users/smy/project/book-agent/progress.txt
 
 next_mainline_focus:
-- Move the new claimable repair work-item surface out of controller-owned execution and into an explicit repair agent / repair lane worker, so runtime self-heal can truly self-dispatch repairs.
+- Move the executor-owned repair lane toward a dedicated repair agent contract, so runtime self-heal can hand repair work-items to an independent worker without falling back to controller-owned inline execution.

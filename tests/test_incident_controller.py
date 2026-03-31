@@ -7,6 +7,7 @@ from uuid import uuid4
 from book_agent.app.runtime.controllers.budget_controller import BudgetController
 from book_agent.app.runtime.controllers.incident_controller import IncidentController
 from book_agent.app.runtime.controllers.review_controller import ReviewController
+from book_agent.app.runtime.document_run_executor import DocumentRunExecutor
 from book_agent.core.config import Settings
 from book_agent.domain.enums import (
     ChapterRunPhase,
@@ -467,6 +468,27 @@ class IncidentControllerTests(unittest.TestCase):
             controller.reconcile_review_session(chapter_run_id=chapter_run.id)
             session.commit()
 
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root=self.bundle_root,
+            translation_worker=None,
+        )
+        with self.session_factory() as session:
+            execution = executor._run_execution_service(session)
+            claimed = execution.claim_next_work_item(
+                run_id=run.id,
+                stage=WorkItemStage.REPAIR,
+                worker_name="test.repair",
+                worker_instance_id="repair-worker-1",
+                lease_seconds=60,
+            )
+            self.assertIsNotNone(claimed)
+            assert claimed is not None
+            session.commit()
+
+        executor._execute_repair_work_item(run.id, claimed)
+
+        with self.session_factory() as session:
             incident = session.query(RuntimeIncident).filter(RuntimeIncident.run_id == run.id).one()
             proposal = session.query(RuntimePatchProposal).filter(RuntimePatchProposal.incident_id == incident.id).one()
             checkpoint = session.query(RuntimeCheckpoint).filter(

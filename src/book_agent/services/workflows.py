@@ -2568,6 +2568,7 @@ class DocumentWorkflowService:
         issue_chapter_activity = self._to_issue_chapter_activity_map(document_id)
         issue_chapter_worklist_meta = self._to_issue_chapter_worklist_meta(document_id)
         chapter_assignment_map = self._to_chapter_assignment_map(document_id)
+        chapter_memory_proposal_map = self._to_chapter_memory_proposal_queue_map(document_id)
         issue_activity_breakdown = self._to_issue_activity_breakdown(document_id)
         return DocumentExportDashboard(
             document_id=document_id,
@@ -2598,6 +2599,7 @@ class DocumentWorkflowService:
                 issue_chapter_activity,
                 issue_chapter_worklist_meta,
                 chapter_assignment_map,
+                chapter_memory_proposal_map,
             ),
             issue_activity_timeline=self._to_issue_activity_timeline(document_id),
             issue_activity_breakdown=issue_activity_breakdown,

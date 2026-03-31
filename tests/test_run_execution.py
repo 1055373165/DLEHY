@@ -872,9 +872,10 @@ class RunExecutionServiceTests(unittest.TestCase):
                 return_value=SimpleNamespace(
                     incident_id=incident.id,
                     proposal_id=proposal_id,
-                    bundle_revision_id=bad_revision_id,
+                    bundle_revision_id=None,
+                    repair_work_item_id="repair-work-item-1",
                     corrected_route="epub.rebuilt_pdf_via_html",
-                    bound_work_item_ids=[work_item_id],
+                    bound_work_item_ids=[],
                 ),
             ):
                 executor._recover_export_misrouting(
@@ -889,19 +890,14 @@ class RunExecutionServiceTests(unittest.TestCase):
             repository = RunControlRepository(session)
             run = repository.get_run(run_id)
             runtime_v2 = dict((run.status_detail_json or {}).get("runtime_v2") or {})
-            recovery = dict(runtime_v2.get("last_export_route_recovery") or {})
-            lineage = list(runtime_v2.get("recovered_lineage") or [])
+            pending = dict(runtime_v2.get("pending_export_route_repair") or {})
 
         self.assertEqual(run.runtime_bundle_revision_id, stable_revision_id)
-        self.assertEqual(runtime_v2["active_runtime_bundle_revision_id"], stable_revision_id)
-        self.assertEqual(recovery["bundle_revision_id"], bad_revision_id)
-        self.assertEqual(recovery["active_bundle_revision_id"], stable_revision_id)
-        self.assertTrue(recovery["rollback_performed"])
-        self.assertEqual(recovery["replay_work_item_id"], work_item_id)
-        self.assertEqual(recovery["bound_work_item_ids"], [work_item_id])
-        self.assertEqual(len(lineage), 1)
-        self.assertEqual(lineage[0]["proposal_id"], proposal_id)
-        self.assertEqual(lineage[0]["active_bundle_revision_id"], stable_revision_id)
+        self.assertEqual(pending["incident_id"], incident.id)
+        self.assertEqual(pending["proposal_id"], proposal_id)
+        self.assertEqual(pending["repair_work_item_id"], "repair-work-item-1")
+        self.assertEqual(pending["replay_scope_id"], export_scope_id)
+        self.assertEqual(pending["corrected_route"], "epub.rebuilt_pdf_via_html")
 
     def test_run_control_isoformat_treats_naive_sqlite_datetimes_as_utc(self) -> None:
         with self.session_factory() as session:

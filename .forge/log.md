@@ -69,3 +69,9 @@
 - 2026-03-31 14:34:12 +0800 | executed batch-16 locally in main checkout; no extra worktree or batch fork created
 - 2026-03-31 14:34:12 +0800 | verified batch-16 with unittest (10 tests OK) and py_compile (passed)
 - 2026-03-31 14:34:12 +0800 | wrote .forge/reports/batch-16-report.md and advanced STATE.md to current_step=batch-16_verified
+- 2026-03-31 14:56:54 +0800 | froze batch-17: move repair execution ownership into the executor-owned REPAIR lane so work-items only succeed after validate/publish/finalize and scheduled self-heal executes after commit
+- 2026-03-31 14:56:54 +0800 | executed batch-17 locally in main checkout; no extra worktree or batch fork created
+- 2026-03-31 14:56:54 +0800 | installed missing dev dependencies with `uv sync --extra dev` to restore httpx-backed API acceptance coverage
+- 2026-03-31 14:56:54 +0800 | fixed a workflow dashboard dependency gap (`chapter_memory_proposal_map`) that blocked REQ-EX-02 export dashboard assertions after repair replay
+- 2026-03-31 14:56:54 +0800 | verified batch-17 with unittest (11 tests OK) and py_compile (passed)
+- 2026-03-31 14:56:54 +0800 | wrote .forge/reports/batch-17-report.md and advanced STATE.md to current_step=batch-17_verified

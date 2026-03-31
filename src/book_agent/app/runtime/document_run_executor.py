@@ -14,18 +14,22 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from book_agent.app.runtime.controller_runner import ControllerRunner
 from book_agent.app.runtime.controllers.export_controller import ExportController
+from book_agent.app.runtime.controllers.incident_controller import IncidentController
 from book_agent.core.ids import stable_id
 from book_agent.domain.enums import (
+    JobScopeType,
     DocumentRunStatus,
     DocumentRunType,
     ExportType,
     PacketStatus,
+    RuntimeIncidentKind,
     WorkItemScopeType,
     WorkItemStage,
     WorkItemStatus,
 )
 from book_agent.domain.models import Block, Chapter
-from book_agent.domain.models.ops import DocumentRun, RuntimePatchProposal, WorkItem
+from book_agent.domain.models.ops import DocumentRun, RuntimeIncident, RuntimePatchProposal, WorkItem
+from book_agent.infra.repositories.runtime_resources import RuntimeResourcesRepository
 from book_agent.domain.models.translation import TranslationPacket
 from book_agent.infra.db.session import session_scope
 from book_agent.infra.repositories.run_control import RunControlRepository
@@ -355,6 +359,8 @@ class DocumentRunExecutor:
             try:
                 self._maybe_reconcile_controllers(run_id)
                 self._reclaim_expired_leases(run_id)
+                if self._process_repair_stage(run_id):
+                    continue
                 if self._process_translate_stage(run_id):
                     continue
                 if self._process_review_stage(run_id):
@@ -477,6 +483,38 @@ class DocumentRunExecutor:
 
         if translate_items and all(item.status == WorkItemStatus.SUCCEEDED for item in translate_items):
             self._update_pipeline_stage(run_id, "translate", status="succeeded", current_stage="review")
+        return False
+
+    def _process_repair_stage(self, run_id: str) -> bool:
+        with session_scope(self.session_factory) as session:
+            execution = self._run_execution_service(session)
+            repair_items = self._list_stage_items(session, run_id, WorkItemStage.REPAIR)
+            if not repair_items:
+                return False
+            if any(item.status == WorkItemStatus.TERMINAL_FAILED for item in repair_items):
+                return False
+
+            claimed_items: list[ClaimedRunWorkItem] = []
+            if any(item.status in {WorkItemStatus.PENDING, WorkItemStatus.RETRYABLE_FAILED} for item in repair_items):
+                claimed = execution.claim_next_work_item(
+                    run_id=run_id,
+                    stage=WorkItemStage.REPAIR,
+                    worker_name="app.run.repair",
+                    worker_instance_id=f"app.repair:{uuid4()}",
+                    lease_seconds=self.lease_seconds,
+                )
+                if claimed is not None:
+                    claimed_items.append(claimed)
+
+        if claimed_items:
+            for claimed in claimed_items:
+                self._ensure_work_thread(
+                    run_id=run_id,
+                    work_item_id=claimed.work_item_id,
+                    thread_name=f"book-agent-repair-{claimed.work_item_id}",
+                    target=lambda claimed=claimed: self._execute_repair_work_item(run_id, claimed),
+                )
+            return True
         return False
 
     def _seed_translate_frontier_work_items(
@@ -772,6 +810,131 @@ class DocumentRunExecutor:
             lease_seconds=self.lease_seconds,
         )
 
+    def _execute_repair_work_item(self, run_id: str, claimed: ClaimedRunWorkItem) -> None:
+        input_bundle = self._load_work_item_input_bundle(claimed.work_item_id)
+
+        def _run_repair() -> dict[str, Any]:
+            proposal_id = str(input_bundle.get("proposal_id") or claimed.scope_id)
+            with session_scope(self.session_factory) as session:
+                controller = IncidentController(session=session)
+                controller.begin_repair_dispatch_execution(
+                    proposal_id=proposal_id,
+                    worker_name=claimed.worker_name,
+                    worker_instance_id=claimed.worker_instance_id,
+                    work_item_id=claimed.work_item_id,
+                    lease_token=claimed.lease_token,
+                )
+                proposal = RuntimeResourcesRepository(session).get_runtime_patch_proposal(proposal_id)
+                incident = RuntimeResourcesRepository(session).get_runtime_incident(proposal.incident_id)
+                repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
+                corrected_route = str(
+                    (repair_plan.get("validation") or {}).get("corrected_route")
+                    or (repair_plan.get("bundle") or {})
+                    .get("manifest_json", {})
+                    .get("config", {})
+                    .get("routing_policy", {})
+                    .get("export_routes", {})
+                    .get((incident.bundle_json or {}).get("export_type") or "", {})
+                    .get("selected_route")
+                    or ""
+                )
+                return {
+                    "proposal_id": proposal_id,
+                    "incident_id": proposal.incident_id,
+                    "incident_kind": repair_plan.get("incident_kind"),
+                    "repair_dispatch_id": (proposal.status_detail_json or {}).get("repair_dispatch", {}).get("dispatch_id"),
+                    "patch_surface": (proposal.status_detail_json or {}).get("repair_dispatch", {}).get("patch_surface"),
+                    "changed_files": list(repair_plan.get("owned_files") or []),
+                    "validation_command": (repair_plan.get("validation") or {}).get("command"),
+                    "replay_scope_type": (repair_plan.get("replay") or {}).get("scope_type"),
+                    "replay_scope_id": (repair_plan.get("replay") or {}).get("scope_id"),
+                    "replay_boundary": (repair_plan.get("replay") or {}).get("boundary"),
+                    "bundle_revision_name": (repair_plan.get("bundle") or {}).get("revision_name"),
+                    "corrected_route": corrected_route,
+                }
+
+        def _on_success(payload: dict[str, Any], lease_token: str) -> None:
+            proposal_id = str(payload["proposal_id"])
+            with session_scope(self.session_factory) as session:
+                controller = IncidentController(session=session)
+                execution = self._run_execution_service(session)
+                runtime_repo = RuntimeResourcesRepository(session)
+                proposal = runtime_repo.get_runtime_patch_proposal(proposal_id)
+                incident = runtime_repo.get_runtime_incident(proposal.incident_id)
+                repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
+                validation = controller.validate_patch_proposal(
+                    proposal_id=proposal_id,
+                    passed=True,
+                    report_json=dict(repair_plan.get("validation") or {}),
+                )
+                bundle_record = controller.publish_validated_patch(
+                    proposal_id=proposal_id,
+                    revision_name=str((repair_plan.get("bundle") or {}).get("revision_name") or ""),
+                    manifest_json=dict((repair_plan.get("bundle") or {}).get("manifest_json") or {}),
+                    rollout_scope_json=dict((repair_plan.get("bundle") or {}).get("rollout_scope_json") or {}),
+                )
+
+                if incident.incident_kind == RuntimeIncidentKind.REVIEW_DEADLOCK:
+                    self._finalize_review_deadlock_repair(
+                        session=session,
+                        run_id=run_id,
+                        incident=incident,
+                        proposal=runtime_repo.get_runtime_patch_proposal(proposal_id),
+                        bundle_revision_id=bundle_record.revision.id,
+                        validation_report_json=validation.report_json,
+                    )
+                elif incident.incident_kind == RuntimeIncidentKind.EXPORT_MISROUTING:
+                    self._finalize_export_route_repair(
+                        session=session,
+                        run_id=run_id,
+                        incident=incident,
+                        proposal=runtime_repo.get_runtime_patch_proposal(proposal_id),
+                        bundle_revision_id=bundle_record.revision.id,
+                        corrected_route=str(payload.get("corrected_route") or ""),
+                    )
+                proposal = runtime_repo.get_runtime_patch_proposal(proposal_id)
+                incident = runtime_repo.get_runtime_incident(proposal.incident_id)
+                proposal_detail = dict(proposal.status_detail_json or {})
+                result_payload = {
+                    **payload,
+                    "published_bundle_revision_id": bundle_record.revision.id,
+                    "active_bundle_revision_id": (
+                        (proposal_detail.get("bundle_guard") or {}).get("effective_revision_id")
+                        or bundle_record.revision.id
+                    ),
+                    "bound_work_item_ids": list(proposal_detail.get("bound_work_item_ids") or []),
+                }
+                controller.record_repair_dispatch_execution(
+                    proposal_id=proposal_id,
+                    succeeded=True,
+                    result_json=result_payload,
+                    manage_work_item_lifecycle=False,
+                )
+                execution.complete_work_item_success(
+                    lease_token=lease_token,
+                    output_artifact_refs_json={
+                        "proposal_id": proposal_id,
+                        "incident_id": incident.id,
+                        "published_bundle_revision_id": bundle_record.revision.id,
+                    },
+                    payload_json={
+                        "repair_dispatch_id": payload.get("repair_dispatch_id"),
+                        "patch_surface": payload.get("patch_surface"),
+                        "target_scope_type": payload.get("replay_scope_type"),
+                        "target_scope_id": payload.get("replay_scope_id"),
+                        **result_payload,
+                    },
+                )
+
+        self._execute_claimed_work_item(
+            run_id=run_id,
+            claimed=claimed,
+            worker_fn=_run_repair,
+            on_success=_on_success,
+            stage_key="repair",
+            lease_seconds=self.lease_seconds,
+        )
+
     def _execute_claimed_work_item(
         self,
         *,
@@ -898,6 +1061,21 @@ class DocumentRunExecutor:
                 error_detail_json=error_detail,
                 retryable=retryable,
             )
+            if claimed.stage == WorkItemStage.REPAIR.value:
+                input_bundle = self._load_work_item_input_bundle(claimed.work_item_id)
+                proposal_id = str(input_bundle.get("proposal_id") or claimed.scope_id)
+                try:
+                    IncidentController(session=session).record_repair_dispatch_execution(
+                        proposal_id=proposal_id,
+                        succeeded=False,
+                        result_json={
+                            "error_class": exc.__class__.__name__,
+                            "error_message": str(exc),
+                        },
+                        manage_work_item_lifecycle=False,
+                    )
+                except Exception:
+                    pass
             if (
                 claimed.stage == WorkItemStage.TRANSLATE.value
                 and claimed.scope_type == WorkItemScopeType.PACKET.value
@@ -1012,63 +1190,190 @@ class DocumentRunExecutor:
             return
 
         if run is not None:
-            proposal = session.get(RuntimePatchProposal, recovery.proposal_id)
-            proposal_detail = (
-                dict(proposal.status_detail_json or {})
-                if proposal is not None
-                else {}
-            )
-            bundle_guard = dict(proposal_detail.get("bundle_guard") or {})
-            published_bundle_revision_id = (
-                proposal.published_bundle_revision_id
-                if proposal is not None and proposal.published_bundle_revision_id
-                else recovery.bundle_revision_id
-            )
-            active_bundle_revision_id = str(
-                bundle_guard.get("effective_revision_id")
-                or run.runtime_bundle_revision_id
-                or recovery.bundle_revision_id
-            )
-            rollback_target_revision_id = bundle_guard.get("rollback_target_revision_id")
-            rollback_performed = bool(bundle_guard.get("rollback_performed"))
-            lineage_entry = {
-                "incident_id": recovery.incident_id,
-                "proposal_id": recovery.proposal_id,
-                "published_bundle_revision_id": published_bundle_revision_id,
-                "active_bundle_revision_id": active_bundle_revision_id,
-                "rollback_performed": rollback_performed,
-                "rollback_target_revision_id": rollback_target_revision_id,
-                "replay_scope_id": claimed.scope_id,
-                "replay_work_item_id": claimed.work_item_id,
-                "bound_work_item_ids": list(recovery.bound_work_item_ids),
-                "recorded_at": _utcnow().isoformat(),
-            }
             status_detail = dict(run.status_detail_json or {})
             runtime_v2 = dict(status_detail.get("runtime_v2") or {})
-            runtime_v2["last_export_route_recovery"] = {
+            runtime_v2["pending_export_route_repair"] = {
                 "incident_id": recovery.incident_id,
                 "proposal_id": recovery.proposal_id,
-                "bundle_revision_id": published_bundle_revision_id,
-                "published_bundle_revision_id": published_bundle_revision_id,
-                "active_bundle_revision_id": active_bundle_revision_id,
+                "repair_work_item_id": recovery.repair_work_item_id,
                 "selected_route": selected_route,
-                "rollback_performed": rollback_performed,
-                "rollback_target_revision_id": rollback_target_revision_id,
                 "corrected_route": recovery.corrected_route,
                 "route_candidates": route_candidates,
                 "replay_scope_id": claimed.scope_id,
-                "replay_work_item_id": claimed.work_item_id,
-                "bound_work_item_ids": recovery.bound_work_item_ids,
             }
-            runtime_v2["active_runtime_bundle_revision_id"] = active_bundle_revision_id
-            runtime_v2["runtime_bundle_revision_id"] = active_bundle_revision_id
-            _append_recovered_lineage(runtime_v2, lineage_entry=lineage_entry)
             status_detail["runtime_v2"] = runtime_v2
             run.status_detail_json = status_detail
-            run.runtime_bundle_revision_id = active_bundle_revision_id
             run.updated_at = _utcnow()
             session.add(run)
             session.flush()
+        self.wake(run_id)
+
+    def _finalize_export_route_repair(
+        self,
+        *,
+        session: Session,
+        run_id: str,
+        incident: RuntimeIncident,
+        proposal: RuntimePatchProposal,
+        bundle_revision_id: str,
+        corrected_route: str | None = None,
+    ) -> None:
+        run = session.get(DocumentRun, run_id)
+        if run is None:
+            return
+        proposal_detail = dict(proposal.status_detail_json or {})
+        bundle_guard = dict(proposal_detail.get("bundle_guard") or {})
+        route_candidates = list((incident.bundle_json or {}).get("route_candidates") or [])
+        export_type = (incident.bundle_json or {}).get("export_type")
+        route_evidence_json = dict(incident.route_evidence_json or {})
+        published_bundle_revision_id = proposal.published_bundle_revision_id or bundle_revision_id
+        active_bundle_revision_id = str(
+            bundle_guard.get("effective_revision_id")
+            or run.runtime_bundle_revision_id
+            or published_bundle_revision_id
+        )
+        rollback_target_revision_id = bundle_guard.get("rollback_target_revision_id")
+        rollback_performed = bool(bundle_guard.get("rollback_performed"))
+        bound_work_item_ids = [
+            str(work_item_id)
+            for work_item_id in list(proposal_detail.get("bound_work_item_ids") or [])
+            if str(work_item_id).strip()
+        ]
+        repair_dispatch = dict(proposal_detail.get("repair_dispatch") or {})
+        replay_scope_id = str((repair_dispatch.get("replay") or {}).get("scope_id") or incident.scope_id)
+        replay_work_item_id = bound_work_item_ids[0] if bound_work_item_ids else ""
+        corrected_route = str(
+            corrected_route
+            or (repair_dispatch.get("last_result") or {}).get("result_json", {}).get("corrected_route")
+            or (route_evidence_json.get("corrected_route"))
+            or ""
+        )
+        lineage_entry = {
+            "incident_id": incident.id,
+            "proposal_id": proposal.id,
+            "published_bundle_revision_id": published_bundle_revision_id,
+            "active_bundle_revision_id": active_bundle_revision_id,
+            "rollback_performed": rollback_performed,
+            "rollback_target_revision_id": rollback_target_revision_id,
+            "replay_scope_id": replay_scope_id,
+            "replay_work_item_id": replay_work_item_id,
+            "bound_work_item_ids": bound_work_item_ids,
+            "recorded_at": _utcnow().isoformat(),
+        }
+        status_detail = dict(run.status_detail_json or {})
+        runtime_v2 = dict(status_detail.get("runtime_v2") or {})
+        runtime_v2["last_export_route_recovery"] = {
+            "incident_id": incident.id,
+            "proposal_id": proposal.id,
+            "bundle_revision_id": published_bundle_revision_id,
+            "published_bundle_revision_id": published_bundle_revision_id,
+            "active_bundle_revision_id": active_bundle_revision_id,
+            "selected_route": incident.selected_route,
+            "rollback_performed": rollback_performed,
+            "rollback_target_revision_id": rollback_target_revision_id,
+            "corrected_route": corrected_route,
+            "route_candidates": route_candidates,
+            "export_type": export_type,
+            "replay_scope_id": replay_scope_id,
+            "replay_work_item_id": replay_work_item_id,
+            "bound_work_item_ids": bound_work_item_ids,
+        }
+        runtime_v2["active_runtime_bundle_revision_id"] = active_bundle_revision_id
+        runtime_v2["runtime_bundle_revision_id"] = active_bundle_revision_id
+        runtime_v2.pop("pending_export_route_repair", None)
+        runtime_v2["last_export_route_evidence"] = route_evidence_json
+        _append_recovered_lineage(runtime_v2, lineage_entry=lineage_entry)
+        status_detail["runtime_v2"] = runtime_v2
+        run.status_detail_json = status_detail
+        run.runtime_bundle_revision_id = active_bundle_revision_id
+        run.updated_at = _utcnow()
+        session.add(run)
+        session.flush()
+
+    def _finalize_review_deadlock_repair(
+        self,
+        *,
+        session: Session,
+        run_id: str,
+        incident: RuntimeIncident,
+        proposal: RuntimePatchProposal,
+        bundle_revision_id: str,
+        validation_report_json: dict[str, Any],
+    ) -> None:
+        runtime_repo = RuntimeResourcesRepository(session)
+        route_evidence = dict(incident.route_evidence_json or {})
+        chapter_run_id = str(route_evidence.get("chapter_run_id") or (incident.bundle_json or {}).get("chapter_run_id") or "")
+        review_session_id = str(route_evidence.get("review_session_id") or (incident.bundle_json or {}).get("review_session_id") or "")
+        chapter_id = str((proposal.status_detail_json or {}).get("repair_plan", {}).get("replay", {}).get("scope_id") or incident.scope_id)
+        if not chapter_run_id or not review_session_id or not chapter_id:
+            return
+        review_session = runtime_repo.get_review_session(review_session_id)
+        chapter_run = runtime_repo.get_chapter_run(chapter_run_id)
+        replay_work_item_ids = RunExecutionService(RunControlRepository(session)).ensure_scope_replay_work_items(
+            run_id=run_id,
+            stage=WorkItemStage.REVIEW,
+            scope_type=WorkItemScopeType.CHAPTER,
+            scope_ids=[chapter_id],
+            input_version_bundle_by_scope_id={
+                chapter_id: {
+                    "document_id": chapter_run.document_id,
+                    "chapter_id": chapter_id,
+                    "chapter_run_id": chapter_run.id,
+                    "review_session_id": review_session.id,
+                }
+            },
+        )
+        proposal_detail = dict(proposal.status_detail_json or {})
+        bound_work_item_ids = [
+            str(work_item_id)
+            for work_item_id in list(proposal_detail.get("bound_work_item_ids") or [])
+            if str(work_item_id).strip()
+        ]
+        recovery_payload = {
+            "incident_id": incident.id,
+            "proposal_id": proposal.id,
+            "bundle_revision_id": bundle_revision_id,
+            "repair_work_item_id": str((proposal_detail.get("repair_dispatch") or {}).get("repair_work_item_id") or ""),
+            "replay_scope_id": chapter_id,
+            "replay_work_item_ids": replay_work_item_ids,
+            "bound_work_item_ids": bound_work_item_ids,
+            "reason_code": route_evidence.get("reason_code"),
+            "lane_health_state": route_evidence.get("lane_health_state"),
+            "status": "published",
+        }
+        runtime_repo.merge_review_session_status_detail(
+            review_session.id,
+            {
+                "runtime_v2": {
+                    "last_deadlock_recovery": recovery_payload,
+                }
+            },
+        )
+        runtime_repo.append_chapter_recovered_lineage(
+            chapter_run_id=chapter_run.id,
+            lineage_event={
+                "source": "runtime.review_deadlock",
+                "incident_id": incident.id,
+                "proposal_id": proposal.id,
+                "bundle_revision_id": bundle_revision_id,
+                "replay_scope_id": chapter_id,
+                "repair_work_item_id": str((proposal_detail.get("repair_dispatch") or {}).get("repair_work_item_id") or ""),
+                "status": "published",
+            },
+        )
+        runtime_repo.upsert_checkpoint(
+            run_id=run_id,
+            scope_type=JobScopeType.CHAPTER,
+            scope_id=chapter_id,
+            checkpoint_key="review_controller.deadlock_recovery",
+            checkpoint_json={
+                "chapter_run_id": chapter_run.id,
+                "review_session_id": review_session.id,
+                "recovery": recovery_payload,
+                "validation_report": validation_report_json,
+            },
+            generation=int(chapter_run.generation or 1),
+        )
 
     def _claim_translate_work_items(
         self,

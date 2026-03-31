@@ -235,6 +235,21 @@ class ReqEx02ExportMisroutingSelfHealTests(unittest.TestCase):
             )
             session.commit()
 
+        with self.app.state.session_factory() as session:
+            execution = executor._run_execution_service(session)
+            repair_claimed = execution.claim_next_work_item(
+                run_id=run_id,
+                stage=WorkItemStage.REPAIR,
+                worker_name="test.repair",
+                worker_instance_id="repair-worker-1",
+                lease_seconds=60,
+            )
+            self.assertIsNotNone(repair_claimed)
+            assert repair_claimed is not None
+            session.commit()
+
+        executor._execute_repair_work_item(run_id, repair_claimed)
+
         def _fake_render(_service, _html_path, pdf_path) -> None:
             Path(pdf_path).write_bytes(b"%PDF-1.4\n% recovered\n")
 

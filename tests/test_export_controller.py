@@ -26,6 +26,7 @@ from book_agent.domain.models.ops import (
     RuntimePatchProposal,
     WorkItem,
 )
+from book_agent.app.runtime.document_run_executor import DocumentRunExecutor
 from book_agent.infra.db.base import Base
 from book_agent.infra.db.session import build_engine, build_session_factory
 from book_agent.services.export_routing import ExportRoutingError, ExportRoutingService
@@ -128,7 +129,7 @@ class ExportControllerTests(unittest.TestCase):
             session.commit()
             return run.id, document.id, work_item.id, scope_id
 
-    def test_recover_export_misrouting_publishes_bundle_and_rebinds_retryable_export_scope(self) -> None:
+    def test_recover_export_misrouting_schedules_repair_then_executor_publishes_bundle_and_rebinds_scope(self) -> None:
         run_id, document_id, work_item_id, scope_id = self._seed_misrouted_export_scope()
 
         with self.session_factory() as session:
@@ -161,7 +162,27 @@ class ExportControllerTests(unittest.TestCase):
             session.commit()
 
         self.assertEqual(recovery.corrected_route, "epub.rebuilt_pdf_via_html")
-        self.assertEqual(recovery.bound_work_item_ids, [work_item_id])
+        self.assertTrue(recovery.repair_work_item_id)
+
+        executor = DocumentRunExecutor(
+            session_factory=self.session_factory,
+            export_root=self.bundle_root,
+            translation_worker=None,
+        )
+        with self.session_factory() as session:
+            execution = executor._run_execution_service(session)
+            claimed = execution.claim_next_work_item(
+                run_id=run_id,
+                stage=WorkItemStage.REPAIR,
+                worker_name="test.repair",
+                worker_instance_id="repair-worker-1",
+                lease_seconds=60,
+            )
+            self.assertIsNotNone(claimed)
+            assert claimed is not None
+            session.commit()
+
+        executor._execute_repair_work_item(run_id, claimed)
 
         with self.session_factory() as session:
             incident = session.get(RuntimeIncident, recovery.incident_id)
@@ -178,9 +199,8 @@ class ExportControllerTests(unittest.TestCase):
             self.assertEqual(incident.incident_kind, RuntimeIncidentKind.EXPORT_MISROUTING)
             self.assertEqual(incident.status, RuntimeIncidentStatus.PUBLISHED)
             self.assertEqual(proposal.status, RuntimePatchProposalStatus.PUBLISHED)
-            self.assertEqual(proposal.published_bundle_revision_id, recovery.bundle_revision_id)
-            self.assertEqual(run.runtime_bundle_revision_id, recovery.bundle_revision_id)
-            self.assertEqual(work_item.runtime_bundle_revision_id, recovery.bundle_revision_id)
+            self.assertEqual(proposal.published_bundle_revision_id, run.runtime_bundle_revision_id)
+            self.assertEqual(work_item.runtime_bundle_revision_id, run.runtime_bundle_revision_id)
             self.assertEqual(
                 run.status_detail_json["runtime_v2"]["last_export_route_recovery"]["corrected_route"],
                 "epub.rebuilt_pdf_via_html",
@@ -216,7 +236,7 @@ class ExportControllerTests(unittest.TestCase):
             )
             self.assertEqual(
                 proposal.status_detail_json["repair_dispatch"]["bundle_publication"]["published_revision_id"],
-                recovery.bundle_revision_id,
+                proposal.published_bundle_revision_id,
             )
             self.assertEqual(
                 incident.status_detail_json["latest_patch_proposal"]["repair_plan"]["bundle"]["revision_name"],

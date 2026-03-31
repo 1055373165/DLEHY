@@ -24,7 +24,8 @@ class ExportMisroutingRecoveryResult:
     run_id: str
     incident_id: str
     proposal_id: str
-    bundle_revision_id: str
+    bundle_revision_id: str | None
+    repair_work_item_id: str
     route_evidence_json: dict[str, Any]
     corrected_route: str
     replay_scope_id: str
@@ -117,51 +118,20 @@ class ExportController:
             proposed_by="runtime.export-controller",
             status_detail_json={"repair_plan": repair_plan.handoff_json},
         )
-        self._incident_controller.claim_repair_dispatch(
-            proposal_id=proposal.id,
-            worker_name="runtime.export-controller",
-            worker_instance_id=f"export-auto-repair:{scope_id[:12]}",
-        )
-        self._incident_controller.record_repair_dispatch_execution(
-            proposal_id=proposal.id,
-            succeeded=True,
-            result_json={
-                "changed_files": list(repair_plan.handoff_json.get("owned_files") or []),
-                "corrected_route": corrected_route,
-                "route_candidates": list(route_candidates),
-                "validation_command": repair_plan.validation_report_json.get("command"),
-            },
-        )
-        validation_result = self._incident_controller.validate_patch_proposal(
-            proposal_id=proposal.id,
-            passed=True,
-            report_json=repair_plan.validation_report_json,
-        )
-
-        bundle_record = self._incident_controller.publish_validated_patch(
-            proposal_id=proposal.id,
-            revision_name=repair_plan.revision_name,
-            manifest_json=repair_plan.manifest_json,
-            rollout_scope_json=repair_plan.rollout_scope_json,
-        )
-
         proposal = self._session.get(RuntimePatchProposal, proposal.id)
         incident = self._session.get(RuntimeIncident, incident.id)
         run = self._session.get(DocumentRun, run_id)
         if proposal is None or incident is None or run is None:
-            raise RuntimeError("Runtime misrouting recovery state vanished during publish.")
+            raise RuntimeError("Runtime misrouting recovery state vanished during dispatch scheduling.")
         proposal_detail = dict(proposal.status_detail_json or {})
-        bound_work_item_ids = [
-            str(work_item_id)
-            for work_item_id in proposal_detail.get("bound_work_item_ids", [])
-            if str(work_item_id).strip()
-        ]
+        repair_dispatch = dict(proposal_detail.get("repair_dispatch") or {})
+        repair_work_item_id = str(repair_dispatch.get("repair_work_item_id") or "")
         runtime_v2 = dict((run.status_detail_json or {}).get("runtime_v2") or {})
         runtime_v2["last_export_route_evidence"] = route_evidence_json
-        runtime_v2["last_export_route_recovery"] = {
+        runtime_v2["pending_export_route_repair"] = {
             "incident_id": incident.id,
             "proposal_id": proposal.id,
-            "bundle_revision_id": bundle_record.revision.id,
+            "repair_work_item_id": repair_work_item_id,
             "selected_route": selected_route,
             "corrected_route": corrected_route,
             "route_candidates": list(route_candidates),
@@ -170,7 +140,6 @@ class ExportController:
         status_detail = dict(run.status_detail_json or {})
         status_detail["runtime_v2"] = runtime_v2
         run.status_detail_json = status_detail
-        run.runtime_bundle_revision_id = bundle_record.revision.id
         run.updated_at = _utcnow()
         self._session.add(run)
         self._session.flush()
@@ -179,12 +148,13 @@ class ExportController:
             run_id=run_id,
             incident_id=incident.id,
             proposal_id=proposal.id,
-            bundle_revision_id=bundle_record.revision.id,
+            bundle_revision_id=None,
+            repair_work_item_id=repair_work_item_id,
             route_evidence_json=route_evidence_json,
             corrected_route=corrected_route,
             replay_scope_id=scope_id,
-            bound_work_item_ids=bound_work_item_ids,
-            validation_report_json=validation_result.report_json,
+            bound_work_item_ids=[],
+            validation_report_json={},
         )
 
     def _build_patch_manifest(
