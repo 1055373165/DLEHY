@@ -245,6 +245,15 @@ class IncidentControllerTests(unittest.TestCase):
 
             self.assertEqual(proposal.status.value, "published")
             self.assertEqual(proposal.status_detail_json["repair_dispatch"]["status"], "executed")
+            repair_work_item_id = proposal.status_detail_json["repair_dispatch"]["repair_work_item_id"]
+            repair_work_item = session.get(WorkItem, repair_work_item_id)
+            self.assertIsNotNone(repair_work_item)
+            assert repair_work_item is not None
+            self.assertEqual(repair_work_item.stage, WorkItemStage.REPAIR)
+            self.assertEqual(repair_work_item.scope_type, WorkItemScopeType.ISSUE_ACTION)
+            self.assertEqual(repair_work_item.scope_id, proposal.id)
+            self.assertEqual(repair_work_item.status, WorkItemStatus.SUCCEEDED)
+            self.assertEqual(repair_work_item.input_version_bundle_json["proposal_id"], proposal.id)
             self.assertEqual(
                 proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
                 "passed",
@@ -510,6 +519,14 @@ class IncidentControllerTests(unittest.TestCase):
             proposal.status_detail_json["repair_dispatch"]["status"],
             "executed",
         )
+        repair_work_item_id = proposal.status_detail_json["repair_dispatch"]["repair_work_item_id"]
+        repair_work_item = session.get(WorkItem, repair_work_item_id)
+        self.assertIsNotNone(repair_work_item)
+        assert repair_work_item is not None
+        self.assertEqual(repair_work_item.stage, WorkItemStage.REPAIR)
+        self.assertEqual(repair_work_item.scope_type, WorkItemScopeType.ISSUE_ACTION)
+        self.assertEqual(repair_work_item.scope_id, proposal.id)
+        self.assertEqual(repair_work_item.status, WorkItemStatus.SUCCEEDED)
         self.assertEqual(
             proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
             "passed",

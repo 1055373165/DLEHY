@@ -249,9 +249,17 @@ class ReqMx01ReviewDeadlockSelfHealTests(unittest.TestCase):
             target_chapter.id,
         )
         self.assertEqual(persisted_untouched_chapter_run.conditions_json, {})
-        self.assertTrue(all(item.stage == WorkItemStage.REVIEW for item in persisted_work_items))
-        self.assertTrue(all(item.scope_type == WorkItemScopeType.CHAPTER for item in persisted_work_items))
-        self.assertEqual([item.scope_id for item in persisted_work_items], [target_chapter.id])
+        review_items = [item for item in persisted_work_items if item.stage == WorkItemStage.REVIEW]
+        repair_items = [item for item in persisted_work_items if item.stage == WorkItemStage.REPAIR]
+        self.assertEqual(len(review_items), 1)
+        self.assertEqual(review_items[0].scope_type, WorkItemScopeType.CHAPTER)
+        self.assertEqual(review_items[0].scope_id, target_chapter.id)
+        self.assertEqual(len(repair_items), 1)
+        self.assertEqual(repair_items[0].scope_type, WorkItemScopeType.ISSUE_ACTION)
+        self.assertEqual(repair_items[0].scope_id, proposal.id)
+        self.assertEqual(repair_items[0].status, WorkItemStatus.SUCCEEDED)
+        self.assertEqual(repair_items[0].input_version_bundle_json["target_scope_id"], target_chapter.id)
+        self.assertEqual(repair_items[0].input_version_bundle_json["target_scope_type"], "chapter")
 
 
 if __name__ == "__main__":

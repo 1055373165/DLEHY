@@ -138,6 +138,52 @@ class RunExecutionService:
             ),
         )
 
+    def ensure_repair_dispatch_work_item(
+        self,
+        *,
+        run_id: str,
+        proposal_id: str,
+        incident_id: str,
+        repair_dispatch_json: dict[str, Any],
+        priority: int = 40,
+    ) -> str:
+        input_bundle = {
+            "proposal_id": proposal_id,
+            "incident_id": incident_id,
+            "repair_dispatch_id": repair_dispatch_json.get("dispatch_id"),
+            "patch_surface": repair_dispatch_json.get("patch_surface"),
+            "target_scope_type": repair_dispatch_json.get("replay", {}).get("scope_type"),
+            "target_scope_id": repair_dispatch_json.get("replay", {}).get("scope_id"),
+            "replay_boundary": repair_dispatch_json.get("replay", {}).get("boundary"),
+            "validation_command": repair_dispatch_json.get("validation_command"),
+            "bundle_revision_name": repair_dispatch_json.get("bundle_revision_name"),
+            "rollout_scope_json": dict(repair_dispatch_json.get("rollout_scope_json") or {}),
+        }
+        work_item_ids = self.ensure_scope_replay_work_items(
+            run_id=run_id,
+            stage=WorkItemStage.REPAIR,
+            scope_type=WorkItemScopeType.ISSUE_ACTION,
+            scope_ids=[proposal_id],
+            priority=priority,
+            input_version_bundle_by_scope_id={proposal_id: input_bundle},
+        )
+        return work_item_ids[0]
+
+    def claim_repair_dispatch_work_item(
+        self,
+        *,
+        work_item_id: str,
+        worker_name: str,
+        worker_instance_id: str,
+        lease_seconds: int,
+    ) -> ClaimedRunWorkItem | None:
+        return self.claim_work_item_by_id(
+            work_item_id=work_item_id,
+            worker_name=worker_name,
+            worker_instance_id=worker_instance_id,
+            lease_seconds=lease_seconds,
+        )
+
     def ensure_scope_replay_work_items(
         self,
         *,

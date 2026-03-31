@@ -65,3 +65,7 @@
 - 2026-03-30 21:37:13 +0800 | executed batch-15 locally in main checkout; no extra worktree or batch fork created
 - 2026-03-30 21:37:13 +0800 | verified batch-15 with unittest (9 tests OK) and py_compile (passed)
 - 2026-03-30 21:37:13 +0800 | wrote .forge/reports/batch-15-report.md and advanced STATE.md to current_step=batch-15_verified
+- 2026-03-31 14:34:12 +0800 | froze batch-16: bind repair dispatch lineage to a claimable REPAIR work-item lane and keep bounded review/export self-heal semantics intact
+- 2026-03-31 14:34:12 +0800 | executed batch-16 locally in main checkout; no extra worktree or batch fork created
+- 2026-03-31 14:34:12 +0800 | verified batch-16 with unittest (10 tests OK) and py_compile (passed)
+- 2026-03-31 14:34:12 +0800 | wrote .forge/reports/batch-16-report.md and advanced STATE.md to current_step=batch-16_verified

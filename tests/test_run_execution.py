@@ -289,6 +289,57 @@ class RunExecutionServiceTests(unittest.TestCase):
         self.assertEqual(persisted_items[0].status, WorkItemStatus.PENDING)
         self.assertEqual(persisted_items[0].input_version_bundle_json["document_id"], document_id)
 
+    def test_ensure_repair_dispatch_work_item_seeds_claimable_repair_lane_once(self) -> None:
+        run_id = self._create_running_run()
+        proposal_id = str(uuid4())
+
+        with self.session_factory() as session:
+            repository = RunControlRepository(session)
+            execution = RunExecutionService(repository)
+            first_id = execution.ensure_repair_dispatch_work_item(
+                run_id=run_id,
+                proposal_id=proposal_id,
+                incident_id=str(uuid4()),
+                repair_dispatch_json={
+                    "dispatch_id": str(uuid4()),
+                    "patch_surface": "runtime_bundle",
+                    "validation_command": "uv run pytest tests/test_incident_controller.py",
+                    "bundle_revision_name": "bundle-repair-1",
+                    "rollout_scope_json": {"mode": "dev"},
+                    "replay": {
+                        "scope_type": "chapter",
+                        "scope_id": "chapter-1",
+                        "boundary": "review_session",
+                    },
+                },
+            )
+            second_id = execution.ensure_repair_dispatch_work_item(
+                run_id=run_id,
+                proposal_id=proposal_id,
+                incident_id=str(uuid4()),
+                repair_dispatch_json={
+                    "dispatch_id": str(uuid4()),
+                    "patch_surface": "runtime_bundle",
+                    "validation_command": "uv run pytest tests/test_incident_controller.py",
+                    "bundle_revision_name": "bundle-repair-1",
+                    "rollout_scope_json": {"mode": "dev"},
+                    "replay": {
+                        "scope_type": "chapter",
+                        "scope_id": "chapter-1",
+                        "boundary": "review_session",
+                    },
+                },
+            )
+            work_item = repository.get_work_item(first_id)
+
+        self.assertEqual(first_id, second_id)
+        self.assertEqual(work_item.stage, WorkItemStage.REPAIR)
+        self.assertEqual(work_item.scope_type, WorkItemScopeType.ISSUE_ACTION)
+        self.assertEqual(work_item.scope_id, proposal_id)
+        self.assertEqual(work_item.status, WorkItemStatus.PENDING)
+        self.assertEqual(work_item.input_version_bundle_json["proposal_id"], proposal_id)
+        self.assertEqual(work_item.input_version_bundle_json["target_scope_type"], "chapter")
+
     def test_executor_reclaims_expired_leases_before_stage_progression(self) -> None:
         run_id = self._create_running_run(
             budget=RunBudgetSummary(

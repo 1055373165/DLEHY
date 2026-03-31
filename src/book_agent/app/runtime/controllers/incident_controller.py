@@ -15,6 +15,8 @@ from book_agent.domain.enums import (
 )
 from book_agent.domain.models.ops import DocumentRun, RuntimePatchProposal
 from book_agent.infra.repositories.runtime_resources import RuntimeResourcesRepository
+from book_agent.infra.repositories.run_control import RunControlRepository
+from book_agent.services.run_execution import RunExecutionService
 from book_agent.services.bundle_guard import BundleGuardService
 from book_agent.services.runtime_bundle import RuntimeBundleRecord, RuntimeBundleService
 from book_agent.services.runtime_patch_validation import (
@@ -38,6 +40,7 @@ class IncidentController:
     ):
         self._session = session
         self._runtime_repo = RuntimeResourcesRepository(session)
+        self._run_execution = RunExecutionService(RunControlRepository(session))
         self._bundle_service = bundle_service or RuntimeBundleService(session)
         self._bundle_guard_service = bundle_guard_service or BundleGuardService(
             session,
@@ -72,6 +75,7 @@ class IncidentController:
         repair_plan = dict((status_detail_json or {}).get("repair_plan") or {})
         repair_dispatch = (
             self._seed_repair_dispatch(
+                run_id=incident.run_id,
                 incident_id=incident.id,
                 proposal_id=proposal.id,
                 patch_surface=patch_surface,
@@ -111,11 +115,28 @@ class IncidentController:
         proposal = self._runtime_repo.get_runtime_patch_proposal(proposal_id)
         incident = self._runtime_repo.get_runtime_incident(proposal.incident_id)
         dispatch = self._get_repair_dispatch(proposal)
+        work_item_id = str(dispatch.get("repair_work_item_id") or "")
+        if not work_item_id:
+            raise ValueError(f"Repair dispatch is missing repair work item id: {proposal_id}")
+        claimed_work_item = self._run_execution.claim_repair_dispatch_work_item(
+            work_item_id=work_item_id,
+            worker_name=worker_name,
+            worker_instance_id=worker_instance_id,
+            lease_seconds=300,
+        )
+        if claimed_work_item is None:
+            raise ValueError(f"Repair dispatch work item is not claimable: {proposal_id}")
+        claimed_work_item = self._run_execution.start_work_item(
+            lease_token=claimed_work_item.lease_token,
+            lease_seconds=300,
+        )
         now = _utcnow()
         execution = {
             "execution_id": str(uuid4()),
             "worker_name": worker_name,
             "worker_instance_id": worker_instance_id,
+            "work_item_id": claimed_work_item.work_item_id,
+            "lease_token": claimed_work_item.lease_token,
             "claimed_at": now.isoformat(),
             "status": "running",
         }
@@ -143,6 +164,9 @@ class IncidentController:
         current_execution = dict(dispatch.get("current_execution") or {})
         if not current_execution:
             raise ValueError(f"Repair dispatch has not been claimed: {proposal_id}")
+        lease_token = str(current_execution.get("lease_token") or "")
+        if not lease_token:
+            raise ValueError(f"Repair dispatch is missing lease token: {proposal_id}")
 
         now = _utcnow()
         execution_record = {
@@ -151,6 +175,28 @@ class IncidentController:
             "status": "succeeded" if succeeded else "failed",
             "result_json": dict(result_json or {}),
         }
+        if succeeded:
+            self._run_execution.complete_work_item_success(
+                lease_token=lease_token,
+                output_artifact_refs_json={
+                    "proposal_id": proposal.id,
+                    "incident_id": incident.id,
+                },
+                payload_json={
+                    "repair_dispatch_id": dispatch.get("dispatch_id"),
+                    "patch_surface": dispatch.get("patch_surface"),
+                    "target_scope_type": dispatch.get("replay", {}).get("scope_type"),
+                    "target_scope_id": dispatch.get("replay", {}).get("scope_id"),
+                    **dict(result_json or {}),
+                },
+            )
+        else:
+            self._run_execution.complete_work_item_failure(
+                lease_token=lease_token,
+                error_class="repair_dispatch_failed",
+                error_detail_json=dict(result_json or {}),
+                retryable=False,
+            )
         history = [
             dict(entry)
             for entry in list(dispatch.get("execution_history") or [])
@@ -305,12 +351,13 @@ class IncidentController:
     def _seed_repair_dispatch(
         self,
         *,
+        run_id: str,
         incident_id: str,
         proposal_id: str,
         patch_surface: str,
         repair_plan: dict[str, Any],
     ) -> dict[str, Any]:
-        return {
+        dispatch = {
             "dispatch_id": str(uuid4()),
             "status": "pending",
             "claim_mode": str((repair_plan.get("dispatch") or {}).get("claim_mode") or "runtime_owned"),
@@ -327,6 +374,13 @@ class IncidentController:
             "current_execution": None,
             "execution_history": [],
         }
+        dispatch["repair_work_item_id"] = self._run_execution.ensure_repair_dispatch_work_item(
+            run_id=run_id,
+            proposal_id=proposal_id,
+            incident_id=incident_id,
+            repair_dispatch_json=dispatch,
+        )
+        return dispatch
 
     def _get_repair_dispatch(self, proposal: RuntimePatchProposal) -> dict[str, Any]:
         dispatch = dict((proposal.status_detail_json or {}).get("repair_dispatch") or {})

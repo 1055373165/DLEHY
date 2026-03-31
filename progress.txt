@@ -1,5 +1,5 @@
 Book Agent Mainline Handoff
-Last Updated: 2026-03-30 21:37:13 +0800
+Last Updated: 2026-03-31 14:34:12 +0800
 
 1. 高层需求
 
@@ -90,7 +90,11 @@ Last Updated: 2026-03-30 21:37:13 +0800
   - proposal 一创建就会带 `pending` repair dispatch
   - 当前已落地的 review deadlock / export misrouting 自愈链会先走 `claim -> execute -> validate -> publish`
   - proposal / incident 的 `status_detail_json` 会同时保留 execution history、validation、bundle publication 结果
-- 这意味着当前已经从“只有 repair plan”推进到“runtime 自己持有 repair dispatch / execution lineage”，只是还没有把这条 dispatch 接到真正可领取的 repair work-item lane
+- 在此基础上，runtime 现在还会把 `repair_dispatch` 显式绑定到 claimable `REPAIR` work item
+  - repair work item 当前使用 `stage=REPAIR` + `scope_type=ISSUE_ACTION`
+  - `scope_id=proposal_id`，输入 bundle 中保留真正的 target scope / replay boundary / validation command
+  - 当前已落地自愈链现在是通过现有 work-item 生命周期完成 `claim -> start -> succeed`
+- 这意味着当前已经从“只有 repair plan”推进到“runtime 自己持有 repair dispatch / execution lineage + 可领取 repair work-item surface”，只是还没有把这条 dispatch 接到独立 repair agent worker
 
 5. 最近一次验证基线
 
@@ -98,7 +102,7 @@ runtime self-heal 当前验证结果：
 
 - 命令：
   .venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal
-  结果：Ran 9 tests, OK
+  结果：Ran 10 tests, OK
 
 - 命令：
   .venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py
@@ -116,21 +120,23 @@ Runtime Self-Heal 主线收敛阶段
 
 7. 建议交给 Forge 的下一刀
 
-batch-1 到 batch-15 已经完成。下一批最自然的主线，不是继续增加前端 lane 卡片，而是把 repair dispatch 继续推进成真正可领取的 runtime repair lane：
+batch-1 到 batch-16 已经完成。下一批最自然的主线，不是继续增加前端 lane 卡片，而是把 repair work-item dispatch 继续推进成真正独立的 runtime repair agent lane：
 
 - 目标：
-  让 runtime 从“proposal/incident 持有 repair dispatch”继续走到“repair dispatch 绑定 repair-stage work item / claim surface”，为真正的自修复 agent 执行面做准备。
+  让 runtime 从“controller 内自执行 repair work-item”继续走到“独立 repair agent / repair lane worker 领取 repair work-item”，为真正的自修复执行器做准备。
 
 - 期望效果：
-  incident 不只是记录问题、提案和 dispatch lineage，而是能明确告诉系统：下一步由哪个 repair lane 领取、修哪类 surface、用什么验证、发布到哪条 rollout scope、回放哪一级失败任务。
+  incident 不只是记录问题、提案和 dispatch lineage，而是能明确告诉系统：下一步由哪个 repair agent 领取、修哪类 surface、用什么验证、发布到哪条 rollout scope、回放哪一级失败任务。
 
 - 建议范围：
   - src/book_agent/app/runtime/controllers/incident_controller.py
   - src/book_agent/services/runtime_repair_planner.py
   - src/book_agent/services/run_execution.py
   - src/book_agent/infra/repositories/run_control.py
+  - src/book_agent/app/runtime/document_run_executor.py
   - tests/test_incident_controller.py
   - tests/test_run_execution.py
+  - tests/test_req_mx_01_review_deadlock_self_heal.py
   - docs/mainline-progress.md
 
 - 验收门：

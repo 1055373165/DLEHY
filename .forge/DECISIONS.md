@@ -20,18 +20,20 @@
   - `src/book_agent/app/runtime/controllers/review_controller.py`
   - `src/book_agent/services/run_execution.py`
   - `src/book_agent/infra/repositories/run_control.py`
+  - `src/book_agent/app/runtime/document_run_executor.py`
   - `tests/test_runtime_repair_planner.py`
   - `tests/test_export_controller.py`
   - `tests/test_incident_controller.py`
   - `tests/test_run_execution.py`
+  - `tests/test_req_mx_01_review_deadlock_self_heal.py`
   - `docs/mainline-progress.md`
 - Expand only if blocked by a real dependency.
 
 5. Verification decision
 - Every batch must pass:
-  - `.venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal`
-  - `.venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py`
+  - `.venv/bin/python -m unittest tests.test_runtime_repair_planner tests.test_export_controller tests.test_incident_controller tests.test_req_mx_01_review_deadlock_self_heal tests.test_run_execution.RunExecutionServiceTests.test_ensure_repair_dispatch_work_item_seeds_claimable_repair_lane_once`
+  - `.venv/bin/python -m py_compile src/book_agent/services/runtime_repair_planner.py src/book_agent/services/run_execution.py src/book_agent/app/runtime/controllers/incident_controller.py src/book_agent/app/runtime/controllers/export_controller.py src/book_agent/app/runtime/controllers/review_controller.py tests/test_runtime_repair_planner.py tests/test_export_controller.py tests/test_incident_controller.py tests/test_run_execution.py tests/test_req_mx_01_review_deadlock_self_heal.py`
 
 6. Immediate next-slice decision
-- The next dependency-closed slice is `repair work-item dispatch`.
-- Goal: keep the new structured repair plan plus proposal-level repair dispatch, then bind it to a claimable `REPAIR` lane / execution surface that a future repair agent can deterministically pick up.
+- The next dependency-closed slice is `repair agent handoff`.
+- Goal: keep the new structured repair plan plus claimable repair work-item surface, then move actual execution from controller-owned claims to an explicit repair agent / repair lane worker.
