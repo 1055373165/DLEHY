@@ -231,6 +231,14 @@ class ExportControllerTests(unittest.TestCase):
             self.assertEqual(repair_work_item.scope_id, proposal.id)
             self.assertEqual(repair_work_item.status, WorkItemStatus.SUCCEEDED)
             self.assertEqual(
+                repair_work_item.input_version_bundle_json["worker_hint"],
+                "export_routing_repair_agent",
+            )
+            self.assertEqual(
+                repair_work_item.input_version_bundle_json["worker_contract_version"],
+                1,
+            )
+            self.assertEqual(
                 proposal.status_detail_json["repair_dispatch"]["validation"]["status"],
                 "passed",
             )

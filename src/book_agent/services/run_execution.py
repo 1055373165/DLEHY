@@ -158,6 +158,11 @@ class RunExecutionService:
             "validation_command": repair_dispatch_json.get("validation_command"),
             "bundle_revision_name": repair_dispatch_json.get("bundle_revision_name"),
             "rollout_scope_json": dict(repair_dispatch_json.get("rollout_scope_json") or {}),
+            "claim_mode": repair_dispatch_json.get("claim_mode"),
+            "claim_target": repair_dispatch_json.get("claim_target"),
+            "dispatch_lane": repair_dispatch_json.get("lane"),
+            "worker_hint": repair_dispatch_json.get("worker_hint"),
+            "worker_contract_version": int(repair_dispatch_json.get("worker_contract_version") or 1),
         }
         work_item_ids = self.ensure_scope_replay_work_items(
             run_id=run_id,

@@ -303,6 +303,11 @@ class RunExecutionServiceTests(unittest.TestCase):
                 repair_dispatch_json={
                     "dispatch_id": str(uuid4()),
                     "patch_surface": "runtime_bundle",
+                    "claim_mode": "runtime_owned",
+                    "claim_target": "runtime_patch_proposal",
+                    "lane": "runtime.repair",
+                    "worker_hint": "review_deadlock_repair_agent",
+                    "worker_contract_version": 1,
                     "validation_command": "uv run pytest tests/test_incident_controller.py",
                     "bundle_revision_name": "bundle-repair-1",
                     "rollout_scope_json": {"mode": "dev"},
@@ -320,6 +325,11 @@ class RunExecutionServiceTests(unittest.TestCase):
                 repair_dispatch_json={
                     "dispatch_id": str(uuid4()),
                     "patch_surface": "runtime_bundle",
+                    "claim_mode": "runtime_owned",
+                    "claim_target": "runtime_patch_proposal",
+                    "lane": "runtime.repair",
+                    "worker_hint": "review_deadlock_repair_agent",
+                    "worker_contract_version": 1,
                     "validation_command": "uv run pytest tests/test_incident_controller.py",
                     "bundle_revision_name": "bundle-repair-1",
                     "rollout_scope_json": {"mode": "dev"},
@@ -339,6 +349,11 @@ class RunExecutionServiceTests(unittest.TestCase):
         self.assertEqual(work_item.status, WorkItemStatus.PENDING)
         self.assertEqual(work_item.input_version_bundle_json["proposal_id"], proposal_id)
         self.assertEqual(work_item.input_version_bundle_json["target_scope_type"], "chapter")
+        self.assertEqual(work_item.input_version_bundle_json["claim_mode"], "runtime_owned")
+        self.assertEqual(work_item.input_version_bundle_json["claim_target"], "runtime_patch_proposal")
+        self.assertEqual(work_item.input_version_bundle_json["dispatch_lane"], "runtime.repair")
+        self.assertEqual(work_item.input_version_bundle_json["worker_hint"], "review_deadlock_repair_agent")
+        self.assertEqual(work_item.input_version_bundle_json["worker_contract_version"], 1)
 
     def test_executor_reclaims_expired_leases_before_stage_progression(self) -> None:
         run_id = self._create_running_run(

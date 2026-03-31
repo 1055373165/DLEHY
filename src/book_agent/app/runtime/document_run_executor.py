@@ -44,6 +44,7 @@ from book_agent.orchestrator.state_machine import (
 )
 from book_agent.services.run_control import RunControlService
 from book_agent.services.run_execution import ClaimedRunWorkItem, RunExecutionService
+from book_agent.services.runtime_repair_worker import RuntimeRepairWorker
 from book_agent.services.export_routing import ExportRoutingError
 from book_agent.services.workflows import DocumentWorkflowService
 from book_agent.workers.translator import TranslationWorker
@@ -812,125 +813,20 @@ class DocumentRunExecutor:
 
     def _execute_repair_work_item(self, run_id: str, claimed: ClaimedRunWorkItem) -> None:
         input_bundle = self._load_work_item_input_bundle(claimed.work_item_id)
-
-        def _run_repair() -> dict[str, Any]:
-            proposal_id = str(input_bundle.get("proposal_id") or claimed.scope_id)
-            with session_scope(self.session_factory) as session:
-                controller = IncidentController(session=session)
-                controller.begin_repair_dispatch_execution(
-                    proposal_id=proposal_id,
-                    worker_name=claimed.worker_name,
-                    worker_instance_id=claimed.worker_instance_id,
-                    work_item_id=claimed.work_item_id,
-                    lease_token=claimed.lease_token,
-                )
-                proposal = RuntimeResourcesRepository(session).get_runtime_patch_proposal(proposal_id)
-                incident = RuntimeResourcesRepository(session).get_runtime_incident(proposal.incident_id)
-                repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
-                corrected_route = str(
-                    (repair_plan.get("validation") or {}).get("corrected_route")
-                    or (repair_plan.get("bundle") or {})
-                    .get("manifest_json", {})
-                    .get("config", {})
-                    .get("routing_policy", {})
-                    .get("export_routes", {})
-                    .get((incident.bundle_json or {}).get("export_type") or "", {})
-                    .get("selected_route")
-                    or ""
-                )
-                return {
-                    "proposal_id": proposal_id,
-                    "incident_id": proposal.incident_id,
-                    "incident_kind": repair_plan.get("incident_kind"),
-                    "repair_dispatch_id": (proposal.status_detail_json or {}).get("repair_dispatch", {}).get("dispatch_id"),
-                    "patch_surface": (proposal.status_detail_json or {}).get("repair_dispatch", {}).get("patch_surface"),
-                    "changed_files": list(repair_plan.get("owned_files") or []),
-                    "validation_command": (repair_plan.get("validation") or {}).get("command"),
-                    "replay_scope_type": (repair_plan.get("replay") or {}).get("scope_type"),
-                    "replay_scope_id": (repair_plan.get("replay") or {}).get("scope_id"),
-                    "replay_boundary": (repair_plan.get("replay") or {}).get("boundary"),
-                    "bundle_revision_name": (repair_plan.get("bundle") or {}).get("revision_name"),
-                    "corrected_route": corrected_route,
-                }
-
-        def _on_success(payload: dict[str, Any], lease_token: str) -> None:
-            proposal_id = str(payload["proposal_id"])
-            with session_scope(self.session_factory) as session:
-                controller = IncidentController(session=session)
-                execution = self._run_execution_service(session)
-                runtime_repo = RuntimeResourcesRepository(session)
-                proposal = runtime_repo.get_runtime_patch_proposal(proposal_id)
-                incident = runtime_repo.get_runtime_incident(proposal.incident_id)
-                repair_plan = dict((proposal.status_detail_json or {}).get("repair_plan") or {})
-                validation = controller.validate_patch_proposal(
-                    proposal_id=proposal_id,
-                    passed=True,
-                    report_json=dict(repair_plan.get("validation") or {}),
-                )
-                bundle_record = controller.publish_validated_patch(
-                    proposal_id=proposal_id,
-                    revision_name=str((repair_plan.get("bundle") or {}).get("revision_name") or ""),
-                    manifest_json=dict((repair_plan.get("bundle") or {}).get("manifest_json") or {}),
-                    rollout_scope_json=dict((repair_plan.get("bundle") or {}).get("rollout_scope_json") or {}),
-                )
-
-                if incident.incident_kind == RuntimeIncidentKind.REVIEW_DEADLOCK:
-                    self._finalize_review_deadlock_repair(
-                        session=session,
-                        run_id=run_id,
-                        incident=incident,
-                        proposal=runtime_repo.get_runtime_patch_proposal(proposal_id),
-                        bundle_revision_id=bundle_record.revision.id,
-                        validation_report_json=validation.report_json,
-                    )
-                elif incident.incident_kind == RuntimeIncidentKind.EXPORT_MISROUTING:
-                    self._finalize_export_route_repair(
-                        session=session,
-                        run_id=run_id,
-                        incident=incident,
-                        proposal=runtime_repo.get_runtime_patch_proposal(proposal_id),
-                        bundle_revision_id=bundle_record.revision.id,
-                        corrected_route=str(payload.get("corrected_route") or ""),
-                    )
-                proposal = runtime_repo.get_runtime_patch_proposal(proposal_id)
-                incident = runtime_repo.get_runtime_incident(proposal.incident_id)
-                proposal_detail = dict(proposal.status_detail_json or {})
-                result_payload = {
-                    **payload,
-                    "published_bundle_revision_id": bundle_record.revision.id,
-                    "active_bundle_revision_id": (
-                        (proposal_detail.get("bundle_guard") or {}).get("effective_revision_id")
-                        or bundle_record.revision.id
-                    ),
-                    "bound_work_item_ids": list(proposal_detail.get("bound_work_item_ids") or []),
-                }
-                controller.record_repair_dispatch_execution(
-                    proposal_id=proposal_id,
-                    succeeded=True,
-                    result_json=result_payload,
-                    manage_work_item_lifecycle=False,
-                )
-                execution.complete_work_item_success(
-                    lease_token=lease_token,
-                    output_artifact_refs_json={
-                        "proposal_id": proposal_id,
-                        "incident_id": incident.id,
-                        "published_bundle_revision_id": bundle_record.revision.id,
-                    },
-                    payload_json={
-                        "repair_dispatch_id": payload.get("repair_dispatch_id"),
-                        "patch_surface": payload.get("patch_surface"),
-                        "target_scope_type": payload.get("replay_scope_type"),
-                        "target_scope_id": payload.get("replay_scope_id"),
-                        **result_payload,
-                    },
-                )
+        repair_worker = RuntimeRepairWorker(session_factory=self.session_factory)
 
         self._execute_claimed_work_item(
             run_id=run_id,
             claimed=claimed,
-            worker_fn=_run_repair,
-            on_success=_on_success,
+            worker_fn=lambda: repair_worker.prepare_execution(
+                claimed=claimed,
+                input_bundle=input_bundle,
+            ),
+            on_success=lambda payload, lease_token: repair_worker.complete_execution(
+                run_id=run_id,
+                payload=payload,
+                lease_token=lease_token,
+            ),
             stage_key="repair",
             lease_seconds=self.lease_seconds,
         )

@@ -86,6 +86,7 @@ class RuntimeRepairPlannerService:
                 "claim_target": "runtime_patch_proposal",
                 "lane": "runtime.repair",
                 "worker_hint": "review_deadlock_repair_agent",
+                "worker_contract_version": 1,
             },
             "replay": {
                 "scope_type": "chapter",
@@ -176,6 +177,7 @@ class RuntimeRepairPlannerService:
                 "claim_target": "runtime_patch_proposal",
                 "lane": "runtime.repair",
                 "worker_hint": "export_routing_repair_agent",
+                "worker_contract_version": 1,
             },
             "replay": {
                 "scope_type": "export",
