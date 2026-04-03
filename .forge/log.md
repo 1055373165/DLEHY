@@ -223,3 +223,7 @@
 - 2026-04-02 15:16:16 +0800 | revalidated `bash .forge/init.sh` while preparing the overall progress + delegation snapshot; baseline stayed green (`Ran 42 tests, OK + smoke warning hygiene validated + governance contract validated`)
 - 2026-04-02 15:22:11 +0800 | opened change request for explicit remaining-work delegation: future development should be handed to Forge v2 rather than left implicit after mainline completion
 - 2026-04-02 15:22:11 +0800 | froze and verified batch-63: remaining-work delegation is now written into `.forge` truth and handoff docs without reopening runtime product behavior
+- 2026-04-03 11:21:49 +0800 | realigned `.forge` mainline from stale runtime-self-heal truth to the active translate-agent readiness line after current benchmark certification reached overall `go`
+- 2026-04-03 11:21:49 +0800 | wrote new handoff truth across `.forge/STATE.md`, `.forge/DECISIONS.md`, `snapshot.md`, `progress.txt`, and `docs/mainline-progress.md` so future resume starts from translate-agent whole-document readiness rather than the completed runtime line
+- 2026-04-03 11:21:49 +0800 | recorded the next translate-agent todo stack: remove the high-risk text-PDF bootstrap gate, improve PDF original-asset extraction parity, begin controlled slice-first whole-document pilots, and expand the benchmark corpus
+- 2026-04-03 11:21:49 +0800 | rewrote `.forge/spec/SPEC.md` and `.forge/spec/FEATURES.json` so spec truth now matches the translate-agent readiness mainline instead of the completed runtime-self-heal feature inventory
