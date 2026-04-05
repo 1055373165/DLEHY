@@ -399,6 +399,29 @@ Legal stop reasons are only:
 
 Anything else is an illegal soft stop, even if the summary looked tidy.
 
+## Hook-Level Enforcement
+
+When Codex hooks are available, Forge v2 stop legality must not rely only on conversational
+discipline.
+
+Install a `Stop` hook guard that reads `.forge/STATE.md` from the current repo and blocks the stop
+unless file truth already shows one of the legal stop states above.
+
+The hook-level guard must:
+
+- treat active execution states such as `ready_for_dispatch` as illegal stop states
+- treat a non-empty next-action queue as evidence that the run should continue, not wrap up
+- allow stop only for explicit legal states such as `mainline_complete`, a recorded blocked state,
+  or an explicit pause/review/framework boundary written into file truth
+- delegate any post-stop automation such as auto-commit only after stop legality passes
+- emit Codex-compatible `Stop` JSON when blocking, with top-level fields like `continue`,
+  `decision=block`, and a non-empty `reason`
+- avoid legacy or nested wrapper shapes such as `{"universal": {"continue": true}, ...}` for
+  `Stop`, because Codex rejects them as invalid stop-hook JSON
+
+If hook enforcement and `.forge` truth disagree, `.forge` truth is the contract and the hook must
+be updated to match it.
+
 ## Style Of Thought
 
 Use narrative paragraphs for reasoning and specification work.

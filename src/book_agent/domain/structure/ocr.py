@@ -16,6 +16,7 @@ from typing import Any, Protocol
 from book_agent.domain.structure.pdf import (
     PdfExtraction,
     PdfFileProfile,
+    PdfImageBlock,
     PdfPage,
     PdfStructureRecoveryService,
     PdfTextBlock,
@@ -78,6 +79,10 @@ class OcrCommandRunner(Protocol):
         ...
 
 
+class OcrTimeoutError(RuntimeError):
+    pass
+
+
 @dataclass(slots=True)
 class UvSuryaOcrRunner:
     runtime_python: str | None = None
@@ -86,6 +91,7 @@ class UvSuryaOcrRunner:
     page_range: str | None = None
     status_path: str | Path | None = None
     heartbeat_interval_seconds: float | None = None
+    max_runtime_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.status_path is None:
@@ -102,6 +108,15 @@ class UvSuryaOcrRunner:
         if self.heartbeat_interval_seconds is None:
             self.heartbeat_interval_seconds = 5.0
         self.heartbeat_interval_seconds = max(float(self.heartbeat_interval_seconds), 0.1)
+        if self.max_runtime_seconds is None:
+            env_max_runtime = os.getenv("BOOK_AGENT_OCR_MAX_RUNTIME_SECONDS")
+            if env_max_runtime:
+                try:
+                    self.max_runtime_seconds = float(env_max_runtime)
+                except ValueError:
+                    self.max_runtime_seconds = None
+        if self.max_runtime_seconds is not None and self.max_runtime_seconds <= 0:
+            self.max_runtime_seconds = None
 
     def _build_command(self, *, file_path: str | Path, output_dir: str | Path) -> list[str]:
         # Surya 0.17.1 currently breaks under transformers 5.x during decoder generation.
@@ -136,6 +151,15 @@ class UvSuryaOcrRunner:
         )
         return command
 
+    def _runtime_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        uv_cache_dir = env.get("UV_CACHE_DIR")
+        if not uv_cache_dir:
+            uv_cache_dir = str((Path(tempfile.gettempdir()) / "book-agent-uv-cache").resolve())
+            env["UV_CACHE_DIR"] = uv_cache_dir
+        Path(uv_cache_dir).mkdir(parents=True, exist_ok=True)
+        return env
+
     def _write_status(self, payload: dict[str, Any]) -> None:
         if self.status_path is None:
             return
@@ -169,6 +193,7 @@ class UvSuryaOcrRunner:
             "surya_package": self.surya_package,
             "transformers_package": self.transformers_package,
             "heartbeat_interval_seconds": self.heartbeat_interval_seconds,
+            "max_runtime_seconds": self.max_runtime_seconds,
             "last_updated_at": _utcnow().isoformat(),
             "output_snapshot": _output_snapshot(output_dir),
             "stdout_tail": stdout_tail,
@@ -216,17 +241,47 @@ class UvSuryaOcrRunner:
         stderr_path = Path(stderr_file.name)
         process: subprocess.Popen[str] | None = None
         returncode: int | None = None
+        runtime_env = self._runtime_env()
         try:
             process = subprocess.Popen(
                 command,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 text=True,
+                env=runtime_env,
             )
             while True:
                 stdout_file.flush()
                 stderr_file.flush()
                 returncode = process.poll()
+                elapsed_seconds = (_utcnow() - started_at).total_seconds()
+                if returncode is None and self.max_runtime_seconds is not None and elapsed_seconds > self.max_runtime_seconds:
+                    process.terminate()
+                    try:
+                        returncode = process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        returncode = process.wait(timeout=5)
+                    timeout_detail = (
+                        f"Surya OCR exceeded max runtime {self.max_runtime_seconds:.1f}s"
+                    )
+                    self._write_status(
+                        self._status_payload(
+                            state="timed_out",
+                            file_path=file_path,
+                            output_dir=output_dir,
+                            command=command,
+                            pid=process.pid,
+                            returncode=returncode,
+                            started_at=started_at,
+                            finished_at=_utcnow(),
+                            stdout_tail=_read_text_tail(stdout_path),
+                            stderr_tail=(
+                                (_read_text_tail(stderr_path) + "\n" + timeout_detail).strip()
+                            ),
+                        )
+                    )
+                    raise OcrTimeoutError(timeout_detail)
                 current_state = "running" if returncode is None else ("succeeded" if returncode == 0 else "failed")
                 self._write_status(
                     self._status_payload(
@@ -245,6 +300,8 @@ class UvSuryaOcrRunner:
                 if returncode is not None:
                     break
                 time.sleep(self.heartbeat_interval_seconds)
+        except OcrTimeoutError:
+            raise
         except Exception as exc:
             stdout_file.flush()
             stderr_file.flush()
@@ -344,17 +401,30 @@ class OcrPdfTextExtractor:
             image_bbox = self._coerce_bbox(page_payload.get("image_bbox"))
             width = image_bbox[2] if image_bbox is not None else 1000.0
             height = image_bbox[3] if image_bbox is not None else 1400.0
+            text_blocks = self._group_lines_into_blocks(
+                page_number=page_number,
+                page_width=width,
+                lines=lines,
+            )
+            image_blocks: list[PdfImageBlock] = []
+            if image_bbox is not None:
+                image_blocks.append(
+                    PdfImageBlock(
+                        page_number=page_number,
+                        block_number=len(text_blocks) + 1,
+                        bbox=image_bbox,
+                        width_px=int(round(max(image_bbox[2] - image_bbox[0], 0.0))) or None,
+                        height_px=int(round(max(image_bbox[3] - image_bbox[1], 0.0))) or None,
+                        image_type="scanned_page_image",
+                    )
+                )
             pages.append(
                 PdfPage(
                     page_number=page_number,
                     width=width,
                     height=height,
-                    blocks=self._group_lines_into_blocks(
-                        page_number=page_number,
-                        page_width=width,
-                        lines=lines,
-                    ),
-                    image_blocks=[],
+                    blocks=text_blocks,
+                    image_blocks=image_blocks,
                 )
             )
 

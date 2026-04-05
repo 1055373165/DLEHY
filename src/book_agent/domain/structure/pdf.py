@@ -454,6 +454,10 @@ _ACADEMIC_HEADING_CONNECTOR_WORDS = {
     "via",
     "with",
 }
+_ACADEMIC_HEADING_LOWERCASE_TOKENS = {
+    "work",
+    "wrong",
+}
 _ACADEMIC_HEADING_TAIL_STOPWORDS = {
     "additionally",
     "however",
@@ -1163,9 +1167,20 @@ def _consume_academic_heading_title(candidate_text: str) -> tuple[str, str] | No
     title_tokens: list[str] = []
     content_tokens = 0
     for index, token in enumerate(tokens):
-        stripped = token.strip("()[]{}.,;:")
+        stripped = token.strip("()[]{}.,;:?!")
         lowered = stripped.casefold()
         remaining = " ".join(tokens[index:]).strip()
+        next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+        next_stripped = (next_token or "").strip("()[]{}.,;:?!")
+        next_lowered = next_stripped.casefold()
+        if lowered in _ACADEMIC_HEADING_CONNECTOR_WORDS and title_tokens:
+            if next_token is not None and (
+                _looks_like_academic_heading_token(next_stripped)
+                or next_lowered in _ACADEMIC_HEADING_CONNECTOR_WORDS
+                or next_lowered in _ACADEMIC_HEADING_LOWERCASE_TOKENS
+            ):
+                title_tokens.append(token)
+                continue
         if (
             title_tokens
             and lowered in _ACADEMIC_BODY_STARTER_WORDS
@@ -1177,10 +1192,38 @@ def _consume_academic_heading_title(candidate_text: str) -> tuple[str, str] | No
             break
         if title_tokens and lowered in _ACADEMIC_BODY_STARTER_WORDS and _looks_like_academic_prose_lead(remaining):
             break
-        if lowered in _ACADEMIC_HEADING_CONNECTOR_WORDS and title_tokens:
+        if title_tokens and lowered in _ACADEMIC_HEADING_LOWERCASE_TOKENS:
             title_tokens.append(token)
+            content_tokens += 1
+            if content_tokens >= 6:
+                break
+            continue
+        if (
+            title_tokens
+            and stripped.islower()
+            and lowered not in _ACADEMIC_BODY_STARTER_WORDS
+            and next_token is not None
+            and (
+                _looks_like_academic_heading_token(next_stripped)
+                or next_lowered in _ACADEMIC_HEADING_CONNECTOR_WORDS
+            )
+        ):
+            title_tokens.append(token)
+            content_tokens += 1
+            if content_tokens >= 6:
+                break
             continue
         if _looks_like_academic_heading_token(stripped):
+            prospective_remainder = " ".join(tokens[index + 1 :]).strip()
+            if (
+                title_tokens
+                and content_tokens >= 1
+                and prospective_remainder
+                and _looks_like_academic_prose_lead(prospective_remainder)
+                and lowered not in _ACADEMIC_HEADING_TAIL_NOUNS
+                and not token.rstrip().endswith(("?", "!", ":"))
+            ):
+                break
             title_tokens.append(token)
             content_tokens += 1
             if content_tokens >= 6:
@@ -1495,6 +1538,20 @@ def _page_has_title_overlap_signal(page: "PdfPage", title: str | None) -> bool:
         if _titles_overlap(text, normalized_title) or compact_text == compact_title:
             return True
         if len(compact_text) >= 12 and (compact_text in compact_title or compact_title in compact_text):
+            return True
+    return False
+
+
+def _early_page_has_title_signal(
+    pages: list["PdfPage"],
+    title: str | None,
+    *,
+    window: int = 2,
+) -> bool:
+    if not pages:
+        return False
+    for page in pages[: max(window, 1)]:
+        if _page_has_centered_title_signal(page) or _page_has_title_overlap_signal(page, title):
             return True
     return False
 
@@ -2831,6 +2888,53 @@ class _PageAssistPlan:
     region_candidates: tuple[dict[str, Any], ...] = ()
 
 
+@dataclass(slots=True, frozen=True)
+class _PageExtractionPlan:
+    intent: str
+    reasons: tuple[str, ...]
+    scope: str = "page"
+
+
+def _page_extraction_plan(
+    page: "PdfPage",
+    *,
+    profile: "PdfFileProfile",
+    page_layout_assessment: _PageLayoutAssessment,
+    page_context: _PageRecoveryContext,
+) -> _PageExtractionPlan:
+    reasons = list(page_layout_assessment.reasons)
+    if page_context.page_family != "body":
+        reasons.append(f"page_family_{page_context.page_family}")
+    if page_context.family_source and page_context.family_source != "body":
+        reasons.append(f"page_family_source_{page_context.family_source}")
+
+    if profile.pdf_kind == "scanned_pdf" or "ocr_scanned_page" in page_layout_assessment.reasons:
+        intent = "ocr_overlay"
+        reasons.append("scanned_or_ocr_required")
+    elif profile.pdf_kind == "mixed_pdf":
+        intent = "hybrid_merge"
+        reasons.append("mixed_pdf")
+    elif (
+        profile.recovery_lane == "academic_paper"
+        and (
+            "multi_column" in page_layout_assessment.reasons
+            or "column_fragment" in page_layout_assessment.reasons
+            or "academic_first_page_asymmetric" in page_layout_assessment.reasons
+        )
+    ):
+        intent = "hybrid_merge"
+        reasons.append("academic_paper_lane")
+    elif "multi_column" in page_layout_assessment.reasons or "column_fragment" in page_layout_assessment.reasons:
+        intent = "hybrid_merge"
+        reasons.append("layout_fragmentation")
+    else:
+        intent = "native_text"
+        reasons.append("text_preserving")
+
+    deduped_reasons = tuple(dict.fromkeys(reason for reason in reasons if reason))
+    return _PageExtractionPlan(intent=intent, reasons=deduped_reasons)
+
+
 def _assess_page_layout(
     page: "PdfPage",
     *,
@@ -3837,6 +3941,7 @@ class PdfFileProfiler:
                 or _page_has_title_overlap_signal(first_page, extraction.title)
             )
         )
+        early_page_title_signal = _early_page_has_title_signal(extraction.pages, extraction.title, window=2)
         single_column_pymupdf_academic_signal = bool(
             extractor_kind == "pymupdf"
             and first_page is not None
@@ -3861,7 +3966,7 @@ class PdfFileProfiler:
                         or bool(extraction.outline_entries)
                         or single_column_pymupdf_academic_signal
                     )
-                    and (first_page_title_signal or bool(extraction.title))
+                    and (early_page_title_signal or bool(extraction.title))
                 )
             )
         )
@@ -4494,6 +4599,12 @@ class PdfStructureRecoveryService:
         for page in sorted(pages, key=lambda item: item.page_number):
             context = page_contexts.get(page.page_number, _PageRecoveryContext(is_toc_page=False))
             layout_assessment = page_layout_assessments.get(page.page_number, _PageLayoutAssessment())
+            extraction_plan = _page_extraction_plan(
+                page,
+                profile=profile,
+                page_layout_assessment=layout_assessment,
+                page_context=context,
+            )
             layout_signals = list(layout_assessment.reasons)
             toc_entries = [
                 {
@@ -4537,6 +4648,9 @@ class PdfStructureRecoveryService:
                     "layout_signals": layout_signals,
                     "page_layout_risk": layout_assessment.risk,
                     "page_layout_reasons": layout_signals,
+                    "extraction_intent": extraction_plan.intent,
+                    "extraction_intent_scope": extraction_plan.scope,
+                    "extraction_intent_reasons": list(extraction_plan.reasons),
                     "layout_suspect": page.page_number in suspicious_pages,
                     "role_counts": _sorted_counter(role_counts_by_page.get(page.page_number, Counter())),
                     "recovery_flags": sorted(flags_by_page.get(page.page_number, set())),

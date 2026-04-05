@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,8 +55,9 @@ class OcrRuntimeTests(unittest.TestCase):
                         )
                     return result
 
-            def _fake_popen(_command, stdout, stderr, text):
+            def _fake_popen(_command, stdout, stderr, text, env):
                 self.assertTrue(text)
+                self.assertIn("UV_CACHE_DIR", env)
                 stdout.write("warming up model weights\n")
                 stdout.flush()
                 stderr.write("loading OCR runtime\n")
@@ -91,6 +93,83 @@ class OcrRuntimeTests(unittest.TestCase):
             self.assertEqual(status_payload["output_snapshot"]["results_json_path"], str(results_path.resolve()))
             self.assertIn("warming up model weights", status_payload["stdout_tail"])
             self.assertIn("loading OCR runtime", status_payload["stderr_tail"])
+
+    def test_uv_surya_ocr_runner_sets_uv_cache_dir_when_missing(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = UvSuryaOcrRunner()._runtime_env()
+
+        self.assertIn("UV_CACHE_DIR", env)
+        self.assertTrue(Path(env["UV_CACHE_DIR"]).is_dir())
+
+    def test_uv_surya_ocr_runner_times_out_when_max_runtime_is_exceeded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "ocr-output"
+            output_dir.mkdir()
+            status_path = Path(temp_dir) / "ocr-status.json"
+
+            class _FakeProcess:
+                pid = 9876
+                terminated = False
+
+                def poll(self):
+                    return None
+
+                def terminate(self):
+                    self.terminated = True
+
+                def wait(self, timeout=None):
+                    return -15
+
+            fake_process = _FakeProcess()
+
+            def _fake_popen(_command, stdout, stderr, text, env):
+                self.assertTrue(text)
+                self.assertIn("UV_CACHE_DIR", env)
+                return fake_process
+
+            utcnow_values = iter(
+                [
+                    datetime.fromisoformat("2026-04-04T10:00:00+00:00"),
+                    datetime.fromisoformat("2026-04-04T10:00:02+00:00"),
+                    datetime.fromisoformat("2026-04-04T10:00:02+00:00"),
+                    datetime.fromisoformat("2026-04-04T10:00:02+00:00"),
+                ]
+            )
+
+            def _fake_utcnow():
+                try:
+                    return next(utcnow_values)
+                except StopIteration:
+                    return datetime.fromisoformat("2026-04-04T10:00:02+00:00")
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "BOOK_AGENT_OCR_STATUS_PATH": str(status_path),
+                        "BOOK_AGENT_OCR_HEARTBEAT_SECONDS": "0.1",
+                        "BOOK_AGENT_OCR_MAX_RUNTIME_SECONDS": "1",
+                    },
+                    clear=False,
+                ),
+                patch(
+                    "book_agent.domain.structure.ocr.shutil.which",
+                    side_effect=["/opt/homebrew/bin/uv", "/opt/homebrew/bin/python3.13"],
+                ),
+                patch("book_agent.domain.structure.ocr.subprocess.Popen", side_effect=_fake_popen),
+                patch("book_agent.domain.structure.ocr._utcnow", side_effect=_fake_utcnow),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "exceeded max runtime 1.0s"):
+                    UvSuryaOcrRunner().run(
+                        file_path="scan-sample.pdf",
+                        output_dir=output_dir,
+                    )
+
+            self.assertTrue(fake_process.terminated)
+            status_payload = json.loads(status_path.read_text(encoding="utf-8"))
+            self.assertEqual(status_payload["state"], "timed_out")
+            self.assertEqual(status_payload["pid"], 9876)
+            self.assertIn("exceeded max runtime 1.0s", status_payload["stderr_tail"])
 
     def test_ocr_pdf_text_extractor_chunks_large_pdf_runs_and_merges_pages(self) -> None:
         run_calls: list[str | None] = []
@@ -131,6 +210,45 @@ class OcrRuntimeTests(unittest.TestCase):
         self.assertEqual(len(extraction.pages), 65)
         self.assertEqual(extraction.pages[0].blocks[0].text, "Page 1")
         self.assertEqual(extraction.pages[-1].blocks[0].text, "Page 65")
+
+    def test_ocr_pdf_text_extractor_materializes_full_page_image_blocks(self) -> None:
+        class _FakeRunner:
+            def run(self, *, file_path, output_dir):
+                output_path = Path(output_dir)
+                output_path.mkdir(parents=True, exist_ok=True)
+                results_path = output_path / "results.json"
+                results_path.write_text(
+                    json.dumps(
+                        {
+                            Path(file_path).stem: [
+                                {
+                                    "image_bbox": [0, 0, 768, 1089],
+                                    "text_lines": [
+                                        {
+                                            "text": "Scanned page text",
+                                            "confidence": 0.99,
+                                            "bbox": [72, 120, 220, 148],
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return results_path
+
+        extraction = OcrPdfTextExtractor(runner=_FakeRunner(), chunk_page_count=32).extract(
+            "scan-sample.pdf",
+            page_count=1,
+        )
+
+        self.assertEqual(len(extraction.pages), 1)
+        self.assertEqual(extraction.pages[0].blocks[0].text, "Scanned page text")
+        self.assertEqual(len(extraction.pages[0].image_blocks), 1)
+        self.assertEqual(extraction.pages[0].image_blocks[0].image_type, "scanned_page_image")
+        self.assertEqual(extraction.pages[0].image_blocks[0].width_px, 768)
+        self.assertEqual(extraction.pages[0].image_blocks[0].height_px, 1089)
 
 
 if __name__ == "__main__":

@@ -3437,6 +3437,7 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertIn("Do not use top-level keys like translation or translations.", call["payload"]["messages"][1]["content"])
         self.assertIn('"packet_id"', call["payload"]["messages"][1]["content"])
         self.assertEqual(call["payload"]["response_format"]["type"], "json_object")
+        self.assertEqual(call["payload"]["max_tokens"], 8192)
 
     def test_openai_compatible_client_retries_after_incomplete_read_in_live_transport(self) -> None:
         class StubHTTPResponse:
@@ -3472,6 +3473,60 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
                     payload=(
                         '{"id":"chatcmpl_retry_123",'
                         '"usage":{"prompt_tokens":88,"completion_tokens":22,"total_tokens":110},'
+                        '"choices":[{"message":{"content":"{\\"packet_id\\":\\"pkt_1\\",\\"target_segments\\":[{\\"temp_id\\":\\"t1\\",\\"text_zh\\":\\"译文\\",\\"segment_type\\":\\"sentence\\",\\"source_sentence_ids\\":[\\"s1\\"],\\"confidence\\":0.91}],\\"alignment_suggestions\\":[{\\"source_sentence_ids\\":[\\"s1\\"],\\"target_temp_ids\\":[\\"t1\\"],\\"relation_type\\":\\"1:1\\",\\"confidence\\":0.93}],\\"low_confidence_flags\\":[],\\"notes\\":[]}"}}]}'
+                    ).encode("utf-8")
+                ),
+            ],
+        ) as mocked_urlopen:
+            output = client.generate_translation(
+                TranslationPromptRequest(
+                    packet_id="pkt_1",
+                    model_name="deepseek-chat",
+                    prompt_version="p0.llm.v1",
+                    system_prompt="system",
+                    user_prompt="user",
+                    response_schema=TranslationWorkerOutput.model_json_schema(),
+                )
+            )
+
+        self.assertEqual(output.packet_id, "pkt_1")
+        self.assertEqual(output.target_segments[0].text_zh, "译文")
+        self.assertEqual(mocked_urlopen.call_count, 2)
+
+    def test_openai_compatible_client_retries_after_timeout_during_response_read(self) -> None:
+        class StubHTTPResponse:
+            def __init__(self, *, payload: bytes | None = None, read_exc: Exception | None = None) -> None:
+                self.payload = payload
+                self.read_exc = read_exc
+
+            def __enter__(self) -> "StubHTTPResponse":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            def read(self) -> bytes:
+                if self.read_exc is not None:
+                    raise self.read_exc
+                return self.payload or b""
+
+        client = OpenAICompatibleTranslationClient(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            timeout_seconds=45,
+            max_retries=1,
+            retry_backoff_seconds=0,
+            transport=UrllibJSONTransport(),
+        )
+
+        with patch(
+            "book_agent.workers.providers.openai_compatible.urlopen",
+            side_effect=[
+                StubHTTPResponse(read_exc=TimeoutError("The read operation timed out")),
+                StubHTTPResponse(
+                    payload=(
+                        '{"id":"chatcmpl_retry_timeout_123",'
+                        '"usage":{"prompt_tokens":77,"completion_tokens":19,"total_tokens":96},'
                         '"choices":[{"message":{"content":"{\\"packet_id\\":\\"pkt_1\\",\\"target_segments\\":[{\\"temp_id\\":\\"t1\\",\\"text_zh\\":\\"译文\\",\\"segment_type\\":\\"sentence\\",\\"source_sentence_ids\\":[\\"s1\\"],\\"confidence\\":0.91}],\\"alignment_suggestions\\":[{\\"source_sentence_ids\\":[\\"s1\\"],\\"target_temp_ids\\":[\\"t1\\"],\\"relation_type\\":\\"1:1\\",\\"confidence\\":0.93}],\\"low_confidence_flags\\":[],\\"notes\\":[]}"}}]}'
                     ).encode("utf-8")
                 ),
@@ -3665,6 +3720,7 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertEqual(call["url"], "https://api.deepseek.com/chat/completions")
         self.assertEqual(call["payload"]["model"], "deepseek-chat")
         self.assertEqual(call["payload"]["response_format"]["type"], "json_object")
+        self.assertEqual(call["payload"]["max_tokens"], 8192)
 
     def test_factory_builds_openai_compatible_worker_when_credentials_exist(self) -> None:
         settings = Settings(
@@ -3689,6 +3745,7 @@ class TranslationWorkerAbstractionTests(unittest.TestCase):
         self.assertEqual(metadata.runtime_config["base_url"], "https://provider.example/v1/responses")
         self.assertEqual(metadata.runtime_config["timeout_seconds"], 30)
         self.assertEqual(metadata.runtime_config["max_retries"], 1)
+        self.assertEqual(metadata.runtime_config["max_output_tokens"], 8192)
         self.assertEqual(metadata.runtime_config["retry_backoff_seconds"], 1.5)
 
     def test_settings_read_openai_key_from_dotenv_and_ignore_shell_env(self) -> None:

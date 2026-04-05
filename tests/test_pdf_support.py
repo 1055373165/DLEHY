@@ -3016,6 +3016,240 @@ class PdfBootstrapPipelineTests(unittest.TestCase):
         self.assertTrue(profile.academic_paper_candidate)
         self.assertTrue(profile.outline_present)
 
+    def test_profiler_recognizes_multi_column_academic_paper_when_title_starts_on_second_page(self) -> None:
+        reference_text = (
+            "[1] D. Ongaro and J. Ousterhout. 2014. In Search of an Understandable Consensus Algorithm. "
+            "[2] L. Lamport. 2001. Paxos Made Simple."
+        )
+        extraction = PdfExtraction(
+            title=None,
+            author=None,
+            metadata={"pdf_extractor": "pymupdf"},
+            outline_entries=[],
+            pages=[
+                PdfPage(
+                    page_number=1,
+                    width=612.0,
+                    height=792.0,
+                    blocks=[
+                        PdfTextBlock(
+                            page_number=1,
+                            block_number=1,
+                            text="USENIX Annual Technical Conference Proceedings Cover Sheet",
+                            bbox=(84.0, 720.0, 528.0, 744.0),
+                            line_texts=["USENIX Annual Technical Conference Proceedings Cover Sheet"],
+                            span_count=14,
+                            line_count=1,
+                            font_size_min=10.0,
+                            font_size_max=10.0,
+                            font_size_avg=10.0,
+                        )
+                    ],
+                ),
+                PdfPage(
+                    page_number=2,
+                    width=612.0,
+                    height=792.0,
+                    blocks=[
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=1,
+                            text="In Search of an Understandable Consensus Algorithm",
+                            bbox=(108.0, 82.0, 504.0, 108.0),
+                            line_texts=["In Search of an Understandable Consensus Algorithm"],
+                            span_count=48,
+                            line_count=1,
+                            font_size_min=18.0,
+                            font_size_max=20.0,
+                            font_size_avg=19.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=2,
+                            text="Diego Ongaro and John Ousterhout",
+                            bbox=(176.0, 118.0, 436.0, 132.0),
+                            line_texts=["Diego Ongaro and John Ousterhout"],
+                            span_count=26,
+                            line_count=1,
+                            font_size_min=11.0,
+                            font_size_max=12.0,
+                            font_size_avg=11.5,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=3,
+                            text="Stanford University",
+                            bbox=(228.0, 138.0, 384.0, 150.0),
+                            line_texts=["Stanford University"],
+                            span_count=16,
+                            line_count=1,
+                            font_size_min=10.0,
+                            font_size_max=10.0,
+                            font_size_avg=10.0,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=4,
+                            text=(
+                                "Abstract Raft is a consensus algorithm for managing a replicated log in "
+                                "double-column systems papers."
+                            ),
+                            bbox=(72.0, 174.0, 294.0, 238.0),
+                            line_texts=[
+                                "Abstract Raft is a consensus algorithm for managing a replicated log in",
+                                "double-column systems papers.",
+                            ],
+                            span_count=54,
+                            line_count=2,
+                            font_size_min=10.0,
+                            font_size_max=11.0,
+                            font_size_avg=10.5,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=5,
+                            text="1 Introduction Left column body continues with consensus details.",
+                            bbox=(72.0, 300.0, 294.0, 470.0),
+                            line_texts=[
+                                "1 Introduction Left column body continues with consensus details."
+                            ],
+                            span_count=68,
+                            line_count=8,
+                            font_size_min=10.0,
+                            font_size_max=11.0,
+                            font_size_avg=10.5,
+                        ),
+                        PdfTextBlock(
+                            page_number=2,
+                            block_number=6,
+                            text="2 Background Right column body continues with replication details.",
+                            bbox=(318.0, 300.0, 540.0, 470.0),
+                            line_texts=[
+                                "2 Background Right column body continues with replication details."
+                            ],
+                            span_count=66,
+                            line_count=8,
+                            font_size_min=10.0,
+                            font_size_max=11.0,
+                            font_size_avg=10.5,
+                        ),
+                    ],
+                ),
+                *[
+                    PdfPage(
+                        page_number=index,
+                        width=612.0,
+                        height=792.0,
+                        blocks=[
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=1,
+                                text="1 Introduction Left column opening discussion about consensus recovery.",
+                                bbox=(72.0, 122.0, 294.0, 194.0),
+                                line_texts=["1 Introduction Left column opening discussion about consensus recovery."],
+                                span_count=180,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=2,
+                                text="2 Background Right column opening discussion about replicated state machines.",
+                                bbox=(318.0, 122.0, 540.0, 194.0),
+                                line_texts=["2 Background Right column opening discussion about replicated state machines."],
+                                span_count=180,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=3,
+                                text="Left column middle analysis continues with timing and availability details.",
+                                bbox=(72.0, 220.0, 294.0, 292.0),
+                                line_texts=["Left column middle analysis continues with timing and availability details."],
+                                span_count=170,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=4,
+                                text="Right column middle analysis continues with implementation and benchmark details.",
+                                bbox=(318.0, 220.0, 540.0, 292.0),
+                                line_texts=["Right column middle analysis continues with implementation and benchmark details."],
+                                span_count=170,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=5,
+                                text="Left column concluding paragraph stays ahead of the right column in reading order.",
+                                bbox=(72.0, 318.0, 294.0, 390.0),
+                                line_texts=["Left column concluding paragraph stays ahead of the right column in reading order."],
+                                span_count=170,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=6,
+                                text="Right column concluding paragraph should only appear after the left column is consumed.",
+                                bbox=(318.0, 318.0, 540.0, 390.0),
+                                line_texts=["Right column concluding paragraph should only appear after the left column is consumed."],
+                                span_count=170,
+                                line_count=6,
+                                font_size_min=10.0,
+                                font_size_max=10.5,
+                                font_size_avg=10.2,
+                            ),
+                        ],
+                    )
+                    for index in (3, 4, 5)
+                ],
+                *[
+                    PdfPage(
+                        page_number=index,
+                        width=612.0,
+                        height=792.0,
+                        blocks=[
+                            PdfTextBlock(
+                                page_number=index,
+                                block_number=1,
+                                text=reference_text,
+                                bbox=(108.0, 120.0, 504.0, 720.0),
+                                line_texts=[reference_text],
+                                span_count=220,
+                                line_count=8,
+                                font_size_min=9.0,
+                                font_size_max=10.0,
+                                font_size_avg=9.5,
+                            )
+                        ],
+                    )
+                    for index in (6, 7)
+                ],
+            ],
+        )
+
+        profile = PdfFileProfiler().profile_from_extraction(extraction)
+
+        self.assertEqual(profile.extractor_kind, "pymupdf")
+        self.assertEqual(profile.layout_risk, "medium")
+        self.assertEqual(profile.recovery_lane, "academic_paper")
+        self.assertTrue(profile.academic_paper_candidate)
+        self.assertGreaterEqual(profile.multi_column_page_count, 2)
+
     def test_profiler_recognizes_single_column_pymupdf_academic_paper_without_outline(self) -> None:
         reference_text = (
             "[1] Ashish Vaswani, Noam Shazeer, and Niki Parmar. 2017. Attention Is All You Need. "
@@ -4210,6 +4444,51 @@ class BasicPdfOutlineRecoveryTests(unittest.TestCase):
                 "3.2 Attention",
                 "An attention function can be described as mapping a query and a set of key-value pairs to an output.",
                 {"heading_kind": "numbered", "section_level": 3},
+            ),
+        )
+
+    def test_helper_recovers_question_style_academic_heading(self) -> None:
+        result = _next_academic_inline_heading(
+            "3 What’s wrong with Paxos? Over the last ten years, Leslie Lamport’s Paxos protocol has become almost synonymous with consensus."
+        )
+
+        self.assertEqual(
+            result,
+            (
+                0,
+                "3 What’s wrong with Paxos?",
+                "Over the last ten years, Leslie Lamport’s Paxos protocol has become almost synonymous with consensus.",
+                {"heading_kind": "numbered", "section_level": 2},
+            ),
+        )
+
+    def test_helper_recovers_related_work_heading_with_lowercase_tail(self) -> None:
+        result = _next_academic_inline_heading(
+            "9 Related work There have been numerous publications related to consensus algorithms."
+        )
+
+        self.assertEqual(
+            result,
+            (
+                0,
+                "9 Related work",
+                "There have been numerous publications related to consensus algorithms.",
+                {"heading_kind": "numbered", "section_level": 2},
+            ),
+        )
+
+    def test_helper_does_not_absorb_capitalized_body_token_into_heading(self) -> None:
+        result = _next_academic_inline_heading(
+            "1 Introduction Consensus algorithms allow a collection of machines to work as a coherent group."
+        )
+
+        self.assertEqual(
+            result,
+            (
+                0,
+                "1 Introduction",
+                "Consensus algorithms allow a collection of machines to work as a coherent group.",
+                {"heading_kind": "numbered", "section_level": 2},
             ),
         )
 

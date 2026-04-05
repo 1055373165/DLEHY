@@ -23,6 +23,7 @@ def build_translation_worker(settings: Settings) -> TranslationWorker:
             timeout_seconds=settings.translation_timeout_seconds,
             max_retries=settings.translation_max_retries,
             retry_backoff_seconds=settings.translation_retry_backoff_seconds,
+            max_output_tokens=settings.translation_max_output_tokens,
             input_cache_hit_cost_per_1m_tokens=settings.translation_input_cache_hit_cost_per_1m_tokens,
             input_cost_per_1m_tokens=settings.translation_input_cost_per_1m_tokens,
             output_cost_per_1m_tokens=settings.translation_output_cost_per_1m_tokens,
@@ -39,6 +40,7 @@ def build_translation_worker(settings: Settings) -> TranslationWorker:
                 "timeout_seconds": settings.translation_timeout_seconds,
                 "max_retries": settings.translation_max_retries,
                 "retry_backoff_seconds": settings.translation_retry_backoff_seconds,
+                "max_output_tokens": settings.translation_max_output_tokens,
             },
         )
     raise ValueError(

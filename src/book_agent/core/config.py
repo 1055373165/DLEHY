@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     translation_timeout_seconds: int = 60
     translation_max_retries: int = 1
     translation_retry_backoff_seconds: float = 1.5
+    translation_max_output_tokens: int = 8192
     translation_input_cache_hit_cost_per_1m_tokens: float | None = None
     translation_input_cost_per_1m_tokens: float | None = None
     translation_output_cost_per_1m_tokens: float | None = None

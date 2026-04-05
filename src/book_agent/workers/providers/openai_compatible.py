@@ -70,12 +70,16 @@ class UrllibJSONTransport:
                         raw_bytes = exc.partial
                     else:
                         raise ProviderTransportError("Provider response stream ended unexpectedly.") from exc
+                except (TimeoutError, ConnectionResetError, OSError) as exc:
+                    raise ProviderNetworkError(str(exc)) from exc
                 raw = raw_bytes.decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise ProviderHTTPError(exc.code, detail or str(exc.reason)) from exc
         except URLError as exc:
             raise ProviderNetworkError(str(exc.reason)) from exc
+        except (TimeoutError, ConnectionResetError, OSError) as exc:
+            raise ProviderNetworkError(str(exc)) from exc
         except RemoteDisconnected as exc:
             raise ProviderTransportError("Provider disconnected before sending a complete response.") from exc
 
@@ -92,6 +96,7 @@ class OpenAICompatibleTranslationClient(TranslationModelClient):
     timeout_seconds: int = 60
     max_retries: int = 0
     retry_backoff_seconds: float = 1.0
+    max_output_tokens: int | None = 8192
     input_cache_hit_cost_per_1m_tokens: float | None = None
     input_cost_per_1m_tokens: float | None = None
     output_cost_per_1m_tokens: float | None = None
@@ -192,7 +197,7 @@ class OpenAICompatibleTranslationClient(TranslationModelClient):
 
     def _build_payload(self, request: TranslationPromptRequest, *, api_mode: str) -> dict[str, Any]:
         if api_mode == "chat_completions":
-            return {
+            payload = {
                 "model": request.model_name,
                 "messages": [
                     {"role": "system", "content": request.system_prompt},
@@ -200,6 +205,9 @@ class OpenAICompatibleTranslationClient(TranslationModelClient):
                 ],
                 "response_format": {"type": "json_object"},
             }
+            if self.max_output_tokens is not None:
+                payload["max_tokens"] = self.max_output_tokens
+            return payload
         return {
             "model": request.model_name,
             "input": [
@@ -232,7 +240,7 @@ class OpenAICompatibleTranslationClient(TranslationModelClient):
         api_mode: str,
     ) -> dict[str, Any]:
         if api_mode == "chat_completions":
-            return {
+            payload = {
                 "model": model_name,
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -240,6 +248,9 @@ class OpenAICompatibleTranslationClient(TranslationModelClient):
                 ],
                 "response_format": {"type": "json_object"},
             }
+            if self.max_output_tokens is not None:
+                payload["max_tokens"] = self.max_output_tokens
+            return payload
         return {
             "model": model_name,
             "input": [

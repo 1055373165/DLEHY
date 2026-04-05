@@ -142,6 +142,19 @@ NESTED_HEADING_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
 </html>
 """
 
+OFFSET_HEADING_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <div class="chapter">
+      <h1>Chapter 12. Safety</h1>
+      <section id="Sec1"><h2>12.1 Potential Vulnerabilities</h2></section>
+      <section id="Sec2"><h3>12.1.1 Accidental Failures</h3></section>
+      <section id="Sec3"><h4>Software Bugs and Logical Errors</h4></section>
+    </div>
+  </body>
+</html>
+"""
+
 IMAGE_ONLY_FIGURE_XHTML = """<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body>
@@ -367,6 +380,22 @@ class EPUBParserTests(unittest.TestCase):
         heading_anchors = [block.anchor for block in chapter.blocks if block.block_type == "heading"]
         self.assertEqual(heading_anchors, [None, "using_text_generation_models", "choosing_a_text_generation_model"])
 
+    def test_parse_epub_normalizes_offset_heading_levels_without_extra_shift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            epub_path = Path(tmpdir) / "sample-offset-headings.epub"
+            with zipfile.ZipFile(epub_path, "w") as archive:
+                archive.writestr("mimetype", "application/epub+zip")
+                archive.writestr("META-INF/container.xml", CONTAINER_XML)
+                archive.writestr("OEBPS/content.opf", CONTENT_OPF)
+                archive.writestr("OEBPS/nav.xhtml", NAV_XHTML)
+                archive.writestr("OEBPS/chapter1.xhtml", OFFSET_HEADING_XHTML)
+
+            parsed = EPUBParser().parse(epub_path)
+
+        chapter = parsed.chapters[0]
+        heading_levels = [block.metadata.get("heading_level") for block in chapter.blocks if block.block_type == "heading"]
+        self.assertEqual(heading_levels, [1, 2, 3, 4])
+
     def test_parse_epub_marks_image_only_figure_as_nontranslatable(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             epub_path = Path(tmpdir) / "sample-image-only.epub"
@@ -380,11 +409,10 @@ class EPUBParserTests(unittest.TestCase):
             parsed = EPUBParser().parse(epub_path)
 
         chapter = parsed.chapters[0]
-        self.assertEqual([block.block_type for block in chapter.blocks], ["caption"])
+        self.assertEqual([block.block_type for block in chapter.blocks], ["figure"])
         self.assertEqual(chapter.blocks[0].text, "Cover illustration")
-        self.assertEqual(chapter.blocks[0].metadata["image_caption_generated"], "alt")
         self.assertFalse(chapter.blocks[0].metadata["translatable"])
-        self.assertEqual(chapter.blocks[0].metadata["nontranslatable_reason"], "image_only_artifact")
+        self.assertEqual(chapter.blocks[0].metadata["nontranslatable_reason"], "epub_figure_artifact")
 
     def test_parse_epub_skips_non_linear_and_duplicate_spine_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

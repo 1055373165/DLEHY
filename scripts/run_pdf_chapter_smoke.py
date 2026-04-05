@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -54,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--export-root", required=True)
     parser.add_argument("--report-path", required=True)
-    parser.add_argument("--chapter-ordinal", type=int, default=1)
+    parser.add_argument("--chapter-ordinal", default="auto")
     parser.add_argument("--sample-count", type=int, default=12)
     parser.add_argument("--packet-limit", type=int, default=None)
     parser.add_argument("--ocr-page-range", default=None)
@@ -114,6 +115,129 @@ def _document_id_for_source(source_path: Path) -> str:
     return stable_id("document", _source_fingerprint(source_path))
 
 
+def _resolve_document_id(session, source_path: Path) -> tuple[str, bool]:
+    if source_path.exists():
+        return _document_id_for_source(source_path), False
+
+    existing_document = session.scalar(select(Document).where(Document.source_path == str(source_path)))
+    if existing_document is not None:
+        return existing_document.id, True
+
+    raise FileNotFoundError(f"Source file not found and no matching document exists in database: {source_path}")
+
+
+_FRONTMATTER_TITLE_PATTERNS = (
+    "about this book",
+    "about the author",
+    "acknowledg",
+    "author biography",
+    "bibliography",
+    "contents",
+    "copyright",
+    "cover",
+    "dedication",
+    "foreword",
+    "glossary",
+    "imprint",
+    "index",
+    "introduction to this edition",
+    "list of figures",
+    "list of tables",
+    "preface",
+    "table of contents",
+    "title page",
+)
+
+
+def _normalize_title(title: str | None) -> str:
+    if not title:
+        return ""
+    return " ".join(str(title).split()).strip()
+
+
+def _looks_like_frontmatter_title(title: str | None) -> bool:
+    normalized = _normalize_title(title).lower()
+    if not normalized:
+        return True
+    if any(marker in normalized for marker in _FRONTMATTER_TITLE_PATTERNS):
+        return True
+    if normalized in {"contents", "references", "appendix", "appendices"}:
+        return True
+    return False
+
+
+def _looks_like_structural_heading_title(title: str | None) -> bool:
+    normalized = _normalize_title(title)
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if lowered.startswith(("chapter ", "part ", "section ")):
+        return True
+    if re.match(r"^\d+(?:\.\d+)*\b", normalized):
+        return True
+    if re.match(r"^[ivxlcdm]+\.\s", lowered):
+        return True
+    return False
+
+
+def _chapter_packet_status_counts(session, chapter_id: str) -> dict[str, int]:
+    rows = _chapter_packet_rows(session, chapter_id)
+    counts: dict[str, int] = {}
+    for _, status in rows:
+        status_value = status.value if hasattr(status, "value") else str(status)
+        counts[status_value] = counts.get(status_value, 0) + 1
+    return counts
+
+
+def _auto_select_chapter_ordinal(
+    chapters: list[Any],
+    *,
+    packet_counts_by_chapter_id: dict[str, dict[str, int]],
+) -> int | None:
+    ranked_candidates: list[tuple[tuple[int, int, int, int], int]] = []
+    for chapter in chapters:
+        chapter_id = getattr(chapter, "chapter_id", None)
+        chapter_ordinal = getattr(chapter, "ordinal", None)
+        if not isinstance(chapter_id, str) or not isinstance(chapter_ordinal, int):
+            continue
+        counts = packet_counts_by_chapter_id.get(chapter_id, {})
+        built_count = int(counts.get(PacketStatus.BUILT.value, 0))
+        if built_count <= 0:
+            continue
+        title_src = getattr(chapter, "title_src", "")
+        frontmatter_penalty = 1 if _looks_like_frontmatter_title(title_src) else 0
+        structural_penalty = 0 if _looks_like_structural_heading_title(title_src) else 1
+        content_penalty = 0 if (int(getattr(chapter, "sentence_count", 0) or 0) >= 8) else 1
+        ranked_candidates.append(
+            (
+                (frontmatter_penalty, structural_penalty, content_penalty, chapter_ordinal),
+                chapter_ordinal,
+            )
+        )
+    if not ranked_candidates:
+        return None
+    ranked_candidates.sort(key=lambda item: item[0])
+    return ranked_candidates[0][1]
+
+
+def _resolve_requested_chapter_ordinal(
+    session,
+    document_summary: Any,
+    requested_chapter_ordinal: str,
+) -> int | None:
+    normalized = str(requested_chapter_ordinal).strip().lower()
+    if normalized != "auto":
+        return int(normalized)
+    packet_counts_by_chapter_id = {
+        str(chapter.chapter_id): _chapter_packet_status_counts(session, str(chapter.chapter_id))
+        for chapter in document_summary.chapters
+    }
+    return _auto_select_chapter_ordinal(
+        list(document_summary.chapters),
+        packet_counts_by_chapter_id=packet_counts_by_chapter_id,
+    )
+
+
 def _chapter_packet_ids(session, chapter_id: str) -> list[str]:
     stmt = (
         select(TranslationPacket.id)
@@ -121,6 +245,29 @@ def _chapter_packet_ids(session, chapter_id: str) -> list[str]:
         .order_by(TranslationPacket.created_at.asc(), TranslationPacket.id.asc())
     )
     return [row[0] for row in session.execute(stmt).all()]
+
+
+def _chapter_packet_rows(session, chapter_id: str) -> list[tuple[str, PacketStatus]]:
+    stmt = (
+        select(TranslationPacket.id, TranslationPacket.status)
+        .where(TranslationPacket.chapter_id == chapter_id)
+        .order_by(TranslationPacket.created_at.asc(), TranslationPacket.id.asc())
+    )
+    return [(str(packet_id), status) for packet_id, status in session.execute(stmt).all()]
+
+
+def _select_packet_ids_for_translation(
+    packet_rows: list[tuple[str, PacketStatus]],
+    *,
+    packet_limit: int | None,
+) -> tuple[list[str], list[str]]:
+    all_packet_ids = [packet_id for packet_id, _ in packet_rows]
+    runnable_packet_ids = [
+        packet_id for packet_id, status in packet_rows if status == PacketStatus.BUILT
+    ]
+    if packet_limit is not None:
+        runnable_packet_ids = runnable_packet_ids[: packet_limit]
+    return all_packet_ids, runnable_packet_ids
 
 
 def _chapter_translation_samples(
@@ -240,7 +387,6 @@ def main(argv: list[str] | None = None) -> int:
     Base.metadata.create_all(engine)
     session_factory = build_session_factory(engine=engine)
 
-    document_id = _document_id_for_source(source_path)
     report: dict[str, Any] = {
         "source_path": str(source_path),
         "database_url": args.database_url,
@@ -249,14 +395,18 @@ def main(argv: list[str] | None = None) -> int:
         "packet_limit": args.packet_limit,
         "ocr_page_range": args.ocr_page_range,
         "auto_lock_unlocked_concepts": args.auto_lock_unlocked_concepts,
-        "document_id": document_id,
+        "document_id": None,
         "bootstrap_started_at": datetime.now().isoformat(),
         "bootstrap_in_progress": True,
     }
     _write_report(report_path, report)
-    _emit_progress("bootstrap_start", document_id=document_id, source_path=str(source_path))
+    _emit_progress("bootstrap_start", document_id=None, source_path=str(source_path))
 
     with session_scope(session_factory) as session:
+        document_id, source_missing_resumed = _resolve_document_id(session, source_path)
+        report["document_id"] = document_id
+        report["source_missing_resumed"] = source_missing_resumed
+        _write_report(report_path, report)
         service = _new_service(session, export_root=str(export_root))
         existing_document = session.get(Document, document_id)
         if existing_document is None:
@@ -283,18 +433,45 @@ def main(argv: list[str] | None = None) -> int:
 
         report["bootstrap_in_progress"] = False
         report["bootstrap_finished_at"] = datetime.now().isoformat()
+        document_summary = service.get_document_summary(document_id)
+        resolved_chapter_ordinal = _resolve_requested_chapter_ordinal(
+            session,
+            document_summary,
+            str(args.chapter_ordinal),
+        )
+        report["chapter_ordinal_resolved"] = resolved_chapter_ordinal
+        report["document_summary_after_bootstrap"] = asdict(document_summary)
+        if resolved_chapter_ordinal is None:
+            report["no_work_remaining"] = {
+                "reason": "no_eligible_chapter_with_built_packets",
+            }
+            _write_report(report_path, report)
+            print(
+                json.dumps(
+                    {
+                        "report_path": str(report_path),
+                        "document_id": document_id,
+                        "chapter_id": None,
+                        "fully_translated": True,
+                        "no_work_remaining": True,
+                    }
+                )
+            )
+            return 0
         report["selected_chapter"] = _chapter_summary_payload(
             session,
             document_id,
-            args.chapter_ordinal,
+            resolved_chapter_ordinal,
             export_root=str(export_root),
         )
         chapter_id = str(report["selected_chapter"]["chapter_id"])
-        packet_ids = list(report["selected_chapter"]["packet_ids"])
-        if args.packet_limit is not None:
-            packet_ids = packet_ids[: args.packet_limit]
-            report["selected_chapter"]["packet_ids"] = packet_ids
-        report["document_summary_after_bootstrap"] = asdict(service.get_document_summary(document_id))
+        all_packet_ids, packet_ids = _select_packet_ids_for_translation(
+            _chapter_packet_rows(session, chapter_id),
+            packet_limit=args.packet_limit,
+        )
+        report["selected_chapter"]["all_packet_ids"] = all_packet_ids
+        report["selected_chapter"]["packet_ids"] = packet_ids
+        report["selected_chapter"]["eligible_packet_count"] = len(packet_ids)
         _write_report(report_path, report)
 
     translated_packets: list[dict[str, Any]] = []

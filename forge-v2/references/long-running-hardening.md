@@ -110,6 +110,34 @@ In active takeover mode, another question is required before stopping:
 
 Without that scan, "the inventory is green" is not yet a hardened stop.
 
+## 2.4 Enforce Stop Legality In Hooks, Not Just In Chat
+
+If the runtime supports `Stop` hooks, use them to enforce Forge v2 stop legality.
+
+This matters because a polished summary can still end the turn even when `.forge/STATE.md`
+clearly says the next slice is ready.
+
+The stop hook should:
+
+- read `.forge/STATE.md`
+- reject active continuation states such as `ready_for_dispatch`
+- reject stops that still have an obvious next slice recorded in file truth
+- allow stop only when file truth shows a legal complete, blocked, or explicit pause/review state
+- run any post-stop side effect only after legality passes
+
+Under Codex's current hook parser, `Stop` command output must use the Codex stop schema rather than
+an invented or nested wrapper. In practice that means:
+
+- when blocking the stop, emit top-level JSON fields such as `{"continue": true, "decision":
+  "block", "reason": "..."}`.
+- do not nest `continue` under `universal` for `Stop`; that shape is rejected as invalid stop-hook
+  JSON.
+- keep the blocking `reason` non-empty whenever `decision` is `block`.
+- when allowing the stop, prefer silent success (`exit 0` with empty stdout) unless a real stop-time
+  side effect must emit its own valid Codex hook payload.
+
+Otherwise the stop contract is advisory, not enforced.
+
 ## 3. Start Every Session By Getting Bearings
 
 Every resumed session should do a short deterministic startup ritual:

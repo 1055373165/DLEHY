@@ -134,6 +134,12 @@ def _normalize_chapter_heading_levels(blocks: list[ParsedBlock]) -> list[ParsedB
 
     chapter_base_level = min(numeric_raw_levels)
     first_heading_index = heading_positions[0]
+    first_heading_raw_level = _normalized_heading_level(blocks[first_heading_index].metadata.get("heading_level"))
+    has_peer_level_after_title = any(
+        raw_level == first_heading_raw_level
+        for raw_level in raw_levels[1:]
+        if raw_level is not None and first_heading_raw_level is not None
+    )
     normalized_blocks: list[ParsedBlock] = []
     for index, block in enumerate(blocks):
         if block.block_type != "heading":
@@ -144,7 +150,11 @@ def _normalize_chapter_heading_levels(blocks: list[ParsedBlock]) -> list[ParsedB
         if index == first_heading_index:
             metadata["heading_level"] = 1
         elif raw_level is not None:
-            metadata["heading_level"] = max(2, raw_level - chapter_base_level + 2)
+            if first_heading_raw_level is not None and raw_level == first_heading_raw_level:
+                metadata["heading_level"] = 2
+            else:
+                offset = 2 if has_peer_level_after_title else 1
+                metadata["heading_level"] = max(2, raw_level - chapter_base_level + offset)
         normalized_blocks.append(
             ParsedBlock(
                 block_type=block.block_type,
