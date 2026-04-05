@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import html
+import logging
 import posixpath
 import re
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+logger = logging.getLogger(__name__)
 
 from book_agent.domain.structure.models import ParsedBlock, ParsedChapter, ParsedDocument
 from book_agent.domain.document_titles import compose_document_title
@@ -304,19 +307,88 @@ def _replace_named_html_entities(text: str) -> str:
     return _NAMED_HTML_ENTITY_PATTERN.sub(repl, text)
 
 
+def _sanitize_xml_text(text: str) -> str:
+    """Apply regex-based cleanup to make malformed XML more parseable.
+
+    Handles:
+    - Invalid XML characters (control chars except tab/newline/carriage-return)
+    - Unescaped ampersands (& not followed by a valid entity reference)
+    - Non-breaking spaces and other common problematic characters
+    """
+    # Strip XML-illegal control characters (everything below 0x20 except 0x09, 0x0A, 0x0D).
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    # Escape bare ampersands that are not part of a valid entity reference.
+    text = re.sub(r"&(?!#?\w+;)", "&amp;", text)
+    return text
+
+
 def _parse_xml_document(raw: bytes) -> ET.Element:
     text = raw.decode("utf-8", errors="replace")
+
+    # --- Tier 1: standard parse ---
     try:
         return ET.fromstring(text)
     except ET.ParseError:
-        # EPUB XHTML/OPF files occasionally mix XML with named HTML entities like
-        # &times;. Resolve only those named entities and leave XML escapes like
-        # &lt;...&gt; intact so encoded HTML snippets inside metadata do not become
-        # real XML tags and break parsing.
-        sanitized = _replace_named_html_entities(text)
-        if sanitized == text:
-            raise
-        return ET.fromstring(sanitized)
+        pass
+
+    # --- Tier 2: resolve named HTML entities (e.g. &times;) ---
+    sanitized = _replace_named_html_entities(text)
+    if sanitized != text:
+        try:
+            return ET.fromstring(sanitized)
+        except ET.ParseError:
+            pass
+        text = sanitized  # keep entity-resolved version for subsequent tiers
+
+    # --- Tier 3: lxml with recovery mode (tolerates most malformed XML) ---
+    try:
+        from lxml import etree as lxml_etree  # type: ignore[import-untyped]
+
+        lxml_parser = lxml_etree.XMLParser(recover=True, encoding="utf-8")
+        lxml_root = lxml_etree.fromstring(text.encode("utf-8"), parser=lxml_parser)
+        # If lxml had to fix many structural tag mismatches the recovered tree
+        # may have a significantly different element hierarchy (e.g. elements
+        # re-parented or swallowed).  In that case we prefer to let the caller
+        # fall back to its own HTML-aware parser which handles broken tags more
+        # faithfully.  A small number of mismatches (e.g. a single
+        # <link>/<script> mismatch at the end of a file) is typically benign.
+        total_errors = len(lxml_parser.error_log)
+        tag_mismatch_count = sum(
+            1 for e in lxml_parser.error_log if "ERR_TAG_NAME_MISMATCH" in str(e)
+        )
+        mostly_structural = total_errors > 0 and (tag_mismatch_count / total_errors) > 0.5
+        if not mostly_structural:
+            # Convert lxml tree back to stdlib ElementTree so the rest of the
+            # code (namespace queries, etc.) works identically.
+            return ET.fromstring(lxml_etree.tostring(lxml_root, encoding="unicode"))
+        logger.debug(
+            "lxml recovered with %d/%d structural tag mismatches; skipping to preserve tree fidelity",
+            tag_mismatch_count,
+            total_errors,
+        )
+    except ImportError:
+        logger.debug("lxml not available; skipping recovery-mode XML parse")
+    except Exception:
+        logger.debug("lxml recovery-mode parse also failed", exc_info=True)
+
+    # --- Tier 4: regex-based XML cleanup + retry stdlib parse ---
+    cleaned = _sanitize_xml_text(text)
+    if cleaned != text:
+        try:
+            return ET.fromstring(cleaned)
+        except ET.ParseError:
+            pass
+
+    # --- Tier 5: combined entity resolution + cleanup ---
+    combined = _sanitize_xml_text(_replace_named_html_entities(cleaned))
+    if combined != cleaned:
+        try:
+            return ET.fromstring(combined)
+        except ET.ParseError:
+            pass
+
+    # All tiers exhausted — raise the original error for diagnostics.
+    return ET.fromstring(raw.decode("utf-8", errors="replace"))
 
 
 def _block_type_for_html(tag: str, attrs: dict[str, str]) -> str | None:
@@ -642,7 +714,11 @@ class EPUBParser:
             return {}
 
         nav_path = nav_items[0]["href"]
-        nav_root = _parse_xml_document(archive.read(nav_path))
+        try:
+            nav_root = _parse_xml_document(archive.read(nav_path))
+        except ET.ParseError:
+            logger.warning("Failed to parse EPUB nav document %s; proceeding without TOC", nav_path)
+            return {}
         nav_dir = posixpath.dirname(nav_path)
         nav_map: dict[str, str] = {}
         toc_anchors: list[ET.Element] = []
