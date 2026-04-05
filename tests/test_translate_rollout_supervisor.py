@@ -284,7 +284,8 @@ class TranslateRolloutSupervisorTests(unittest.TestCase):
             packet_limit=4,
         )
 
-        self.assertEqual(actions[0].action, "benchmark_annotation_pending")
+        self.assertEqual(actions[0].action, "auto_annotate_gold_label")
+        self.assertIsNotNone(actions[0].command)  # should now have a command to auto-annotate
 
 
 if __name__ == "__main__":

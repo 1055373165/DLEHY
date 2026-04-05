@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from book_agent.services.translate_benchmark_draft_generator import (
+    auto_annotate_and_write,
     build_pdf_mixed_layout_draft,
     write_draft_files,
 )
@@ -30,6 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Optional queue index filter; may be passed multiple times.",
     )
+    parser.add_argument(
+        "--auto-annotate",
+        action="store_true",
+        help="Auto-annotate existing stub_pending_annotation gold labels by parsing PDF probe pages.",
+    )
     return parser
 
 
@@ -40,6 +46,42 @@ def main(argv: list[str] | None = None) -> int:
     queue_items = load_queue_profile(queue_profile_path)
     selected_indices = set(args.queue_index or [])
     generated: list[dict[str, str]] = []
+    annotated: list[dict[str, str]] = []
+
+    if args.auto_annotate:
+        # Auto-annotate existing stub gold labels
+        gold_labels_dir = review_root / "gold-labels"
+        if gold_labels_dir.exists():
+            for gl_path in sorted(gold_labels_dir.glob("*.json")):
+                try:
+                    gl = json.loads(gl_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if gl.get("status") != "stub_pending_annotation":
+                    continue
+                if selected_indices:
+                    # Match by document_path against queue items
+                    matching = [item for item in queue_items if item.path == gl.get("document_path")]
+                    if not any(item.queue_index in selected_indices for item in matching):
+                        continue
+                try:
+                    result = auto_annotate_and_write(gl_path)
+                    annotated.append({
+                        "sample_id": result.get("sample_id", ""),
+                        "gold_label_path": str(gl_path.resolve()),
+                        "status": result.get("status", ""),
+                        "block_count": str(len(result.get("blocks", []))),
+                    })
+                except FileNotFoundError as exc:
+                    annotated.append({
+                        "sample_id": gl.get("sample_id", ""),
+                        "gold_label_path": str(gl_path.resolve()),
+                        "status": "error",
+                        "error": str(exc),
+                    })
+        print(json.dumps({"annotated": annotated}, ensure_ascii=False))
+        return 0
+
     for item in queue_items:
         if selected_indices and item.queue_index not in selected_indices:
             continue

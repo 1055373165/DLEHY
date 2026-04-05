@@ -240,3 +240,184 @@ def write_draft_files(
     gold_label_path.write_text(json.dumps(gold_label, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return manifest_path, gold_label_path
+
+
+# ---------------------------------------------------------------------------
+# Auto-annotation: parse PDF probe pages and generate gold blocks
+# ---------------------------------------------------------------------------
+
+_HEADING_FONT_SIZE_THRESHOLD = 13.0
+_CAPTION_PREFIXES = ("figure", "fig.", "fig ", "table", "listing", "example", "exhibit")
+
+
+@dataclass(slots=True)
+class _ExtractedSpan:
+    text: str
+    font_size: float
+    font_flags: int
+    bbox: tuple[float, float, float, float]
+
+
+def _extract_page_spans(page: Any) -> list[_ExtractedSpan]:
+    """Extract text spans with font metadata from a fitz page."""
+    spans: list[_ExtractedSpan] = []
+    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+    for block in blocks:
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = span.get("text", "").strip()
+                if not text:
+                    continue
+                spans.append(
+                    _ExtractedSpan(
+                        text=text,
+                        font_size=float(span.get("size", 0)),
+                        font_flags=int(span.get("flags", 0)),
+                        bbox=tuple(span["bbox"]),
+                    )
+                )
+    return spans
+
+
+def _classify_text_block(text: str, max_font_size: float, *, is_bold: bool) -> tuple[str, int | None]:
+    """Return (gold_role, heading_level) for a text block."""
+    stripped = text.strip()
+    lowered = stripped.lower()
+    if lowered.startswith(_CAPTION_PREFIXES):
+        return "caption", None
+    if max_font_size >= _HEADING_FONT_SIZE_THRESHOLD + 6:
+        return "heading", 1
+    if max_font_size >= _HEADING_FONT_SIZE_THRESHOLD + 2:
+        return "heading", 2
+    if max_font_size >= _HEADING_FONT_SIZE_THRESHOLD or (is_bold and len(stripped.split()) < 15):
+        return "heading", 3
+    return "paragraph", None
+
+
+def auto_annotate_gold_label_from_pdf(
+    document_path: Path,
+    gold_label: dict[str, Any],
+) -> dict[str, Any]:
+    """Parse the probe pages in *gold_label* and populate blocks + promote to annotated_v1."""
+    pages = gold_label.get("slice_scope", {}).get("pages", [])
+    if not pages:
+        return gold_label
+
+    blocks: list[dict[str, Any]] = []
+    reading_order = 0
+
+    with fitz.open(str(document_path)) as doc:
+        for page_number in pages:
+            if page_number < 1 or page_number > doc.page_count:
+                continue
+            page = doc.load_page(page_number - 1)
+
+            # ---- images / drawings -> figure blocks ----
+            images = page.get_images(full=True)
+            for img_idx, img in enumerate(images):
+                rects = page.get_image_rects(img[0])
+                if not rects:
+                    continue
+                rect = rects[0]
+                if rect.width < 40 or rect.height < 40:
+                    continue
+                reading_order += 1
+                block_ref = f"p{page_number}-fig-auto-{img_idx + 1}"
+                blocks.append({
+                    "block_ref": block_ref,
+                    "page_number": page_number,
+                    "reading_order_index": reading_order,
+                    "source_bbox": [round(rect.x0, 3), round(rect.y0, 3), round(rect.x1, 3), round(rect.y1, 3)],
+                    "source_selector": None,
+                    "gold_role": "figure",
+                    "heading_level": None,
+                    "protected": True,
+                    "linked_artifact_block_ref": None,
+                    "linked_caption_block_ref": None,
+                    "linked_footnote_anchor": None,
+                    "expected_render_mode": "protect",
+                    "notes": f"Auto-extracted image on page {page_number}.",
+                })
+
+            # ---- text blocks ----
+            text_blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+            for blk in text_blocks:
+                if blk.get("type") != 0:
+                    continue
+                lines = blk.get("lines", [])
+                if not lines:
+                    continue
+                full_text_parts: list[str] = []
+                max_font_size = 0.0
+                has_bold = False
+                for line in lines:
+                    for span in line.get("spans", []):
+                        t = span.get("text", "").strip()
+                        if t:
+                            full_text_parts.append(t)
+                            fs = float(span.get("size", 0))
+                            if fs > max_font_size:
+                                max_font_size = fs
+                            if int(span.get("flags", 0)) & (1 << 4):
+                                has_bold = True
+                full_text = " ".join(full_text_parts)
+                if not full_text.strip():
+                    continue
+
+                bbox = blk["bbox"]
+                role, heading_level = _classify_text_block(full_text, max_font_size, is_bold=has_bold)
+
+                reading_order += 1
+                block_ref = f"p{page_number}-{role}-auto-{reading_order}"
+
+                # Detect if this caption follows a figure on the same page
+                linked_artifact_ref = None
+                if role == "caption" and blocks:
+                    for prev in reversed(blocks):
+                        if prev["page_number"] == page_number and prev["gold_role"] == "figure":
+                            linked_artifact_ref = prev["block_ref"]
+                            prev["linked_caption_block_ref"] = block_ref
+                            break
+
+                protected = role == "figure"
+                render_mode = {
+                    "heading": "zh_markdown_heading",
+                    "caption": "zh_caption",
+                    "figure": "protect",
+                }.get(role, "zh_paragraph")
+
+                blocks.append({
+                    "block_ref": block_ref,
+                    "page_number": page_number,
+                    "reading_order_index": reading_order,
+                    "source_bbox": [round(bbox[0], 3), round(bbox[1], 3), round(bbox[2], 3), round(bbox[3], 3)],
+                    "source_selector": None,
+                    "gold_role": role,
+                    "heading_level": heading_level,
+                    "protected": protected,
+                    "linked_artifact_block_ref": linked_artifact_ref,
+                    "linked_caption_block_ref": None,
+                    "linked_footnote_anchor": None,
+                    "expected_render_mode": render_mode,
+                    "notes": f"Auto-annotated {role} from page {page_number}.",
+                })
+
+    gold_label["blocks"] = blocks
+    gold_label["status"] = "annotated_v1"
+    gold_label["todo"] = [
+        "Auto-annotated by auto_annotate_gold_label_from_pdf. Review block boundaries if needed.",
+    ]
+    return gold_label
+
+
+def auto_annotate_and_write(gold_label_path: Path) -> dict[str, Any]:
+    """Load a stub gold label, auto-annotate it, and write it back."""
+    gold_label = json.loads(gold_label_path.read_text(encoding="utf-8"))
+    if gold_label.get("status") != "stub_pending_annotation":
+        return gold_label
+    document_path = Path(gold_label["document_path"])
+    if not document_path.exists():
+        raise FileNotFoundError(f"Document not found: {document_path}")
+    gold_label = auto_annotate_gold_label_from_pdf(document_path, gold_label)
+    gold_label_path.write_text(json.dumps(gold_label, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return gold_label

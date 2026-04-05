@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -176,7 +177,13 @@ def discover_benchmark_states(review_root: Path) -> dict[str, BenchmarkState]:
             continue
         manifest_path = Path(manifest_path_raw)
         if not manifest_path.is_absolute():
-            manifest_path = (summary_path.parent / manifest_path).resolve()
+            # Try relative to summary file's parent first, then relative to CWD
+            candidate = (summary_path.parent / manifest_path).resolve()
+            if candidate.exists():
+                manifest_path = candidate
+            else:
+                manifest_path = Path.cwd() / manifest_path
+                manifest_path = manifest_path.resolve()
         if not manifest_path.exists():
             continue
         try:
@@ -394,6 +401,29 @@ def _plan_for_item(
         )
 
     if benchmark_manifest_state:
+        if benchmark_manifest_state.gold_label_status == "stub_pending_annotation":
+            # Auto-annotate the stub gold label then run the benchmark
+            command = [
+                sys.executable,
+                "scripts/generate_translate_agent_benchmark_draft.py",
+                "--queue-profile",
+                str(queue_profile_path.resolve()),
+                "--review-root",
+                str((Path.cwd() / "artifacts/review").resolve()),
+                "--queue-index",
+                str(item.queue_index),
+                "--auto-annotate",
+            ]
+            return PlannedAction(
+                action="auto_annotate_gold_label",
+                queue_index=item.queue_index,
+                source_path=item.path,
+                reason="benchmark draft exists with stub gold label; auto-annotating to unblock benchmark",
+                command=command,
+                working_root=str(Path.cwd().resolve()),
+                report_path=None,
+                benchmark_manifest_path=benchmark_manifest_state.manifest_path,
+            )
         return PlannedAction(
             action="benchmark_annotation_pending",
             queue_index=item.queue_index,
@@ -479,10 +509,11 @@ def plan_rollout_actions(
         "start_or_continue_live_pilot_after_benchmark_go": 1,
         "start_live_chapter_pilot": 2,
         "generate_benchmark_draft": 3,
-        "run_benchmark_manifest": 4,
-        "benchmark_annotation_pending": 5,
-        "benchmark_no_go_hold": 6,
-        "benchmark_manifest_missing": 7,
+        "auto_annotate_gold_label": 4,
+        "run_benchmark_manifest": 5,
+        "benchmark_annotation_pending": 6,
+        "benchmark_no_go_hold": 7,
+        "benchmark_manifest_missing": 8,
     }
     live_states_by_source = {state.source_path: state for state in live_states.values()}
     planned.sort(
@@ -619,6 +650,80 @@ def execute_action(action: PlannedAction, *, cwd: Path) -> dict[str, Any]:
     }
 
 
+def _run_action_subprocess(command: list[str], cwd: str) -> dict[str, Any]:
+    """Execute a single action in a subprocess — used by ProcessPoolExecutor."""
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "status": "succeeded" if completed.returncode == 0 else "failed",
+        "returncode": completed.returncode,
+        "stdout_tail": "\n".join(completed.stdout.splitlines()[-20:]),
+        "stderr_tail": "\n".join(completed.stderr.splitlines()[-20:]),
+    }
+
+
+def select_parallel_actions(actions: list[PlannedAction], *, max_parallel: int) -> list[PlannedAction]:
+    """Select up to *max_parallel* executable actions targeting distinct books."""
+    selected: list[PlannedAction] = []
+    seen_sources: set[str] = set()
+    for action in actions:
+        if not action.command:
+            continue
+        if action.source_path in seen_sources:
+            continue
+        selected.append(action)
+        seen_sources.add(action.source_path)
+        if len(selected) >= max_parallel:
+            break
+    return selected
+
+
+def execute_actions_parallel(
+    actions: list[PlannedAction],
+    *,
+    cwd: Path,
+    max_parallel: int,
+) -> list[dict[str, Any]]:
+    """Execute multiple actions concurrently, each targeting a different book."""
+    selected = select_parallel_actions(actions, max_parallel=max_parallel)
+    if not selected:
+        return []
+
+    results: list[dict[str, Any]] = [None] * len(selected)  # type: ignore[list-item]
+    cwd_str = str(cwd.resolve())
+
+    with ProcessPoolExecutor(max_workers=min(len(selected), max_parallel)) as pool:
+        future_to_index = {
+            pool.submit(_run_action_subprocess, action.command, cwd_str): idx
+            for idx, action in enumerate(selected)
+            if action.command
+        }
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                results[idx] = {
+                    **future.result(),
+                    "queue_index": selected[idx].queue_index,
+                    "action": selected[idx].action,
+                    "source_path": selected[idx].source_path,
+                }
+            except Exception as exc:
+                results[idx] = {
+                    "status": "error",
+                    "returncode": -1,
+                    "stdout_tail": "",
+                    "stderr_tail": str(exc),
+                    "queue_index": selected[idx].queue_index,
+                    "action": selected[idx].action,
+                    "source_path": selected[idx].source_path,
+                }
+    return [r for r in results if r is not None]
+
+
 def run_supervisor(
     *,
     queue_profile_path: Path,
@@ -628,6 +733,7 @@ def run_supervisor(
     state_md_path: Path,
     packet_limit: int,
     execute: bool,
+    parallel: int = 1,
 ) -> dict[str, Any]:
     queue_items = load_queue_profile(queue_profile_path)
     live_states = discover_live_pilots(real_book_root)
@@ -642,13 +748,27 @@ def run_supervisor(
         real_book_root=real_book_root,
         packet_limit=packet_limit,
     )
+
     selected_action = actions[0] if actions else None
-    execution_result = (
-        execute_action(selected_action, cwd=Path.cwd()) if execute and selected_action is not None else None
-    )
-    if execute and execution_result and execution_result.get("status") == "succeeded":
+    execution_result: dict[str, Any] | None = None
+    parallel_results: list[dict[str, Any]] | None = None
+
+    if execute and parallel > 1:
+        # Parallel mode: execute up to N actions concurrently
+        parallel_results = execute_actions_parallel(
+            actions,
+            cwd=Path.cwd(),
+            max_parallel=parallel,
+        )
+    elif execute and selected_action is not None:
+        # Sequential mode (original behavior)
+        execution_result = execute_action(selected_action, cwd=Path.cwd())
+
+    # Re-discover state after execution
+    if execute and (execution_result or parallel_results):
         live_states = discover_live_pilots(real_book_root)
         benchmark_states = discover_benchmark_states(review_root)
+        benchmark_manifests = discover_benchmark_manifests(review_root)
         actions = plan_rollout_actions(
             queue_items=queue_items,
             queue_profile_path=queue_profile_path,
@@ -658,6 +778,7 @@ def run_supervisor(
             real_book_root=real_book_root,
             packet_limit=packet_limit,
         )
+
     payload = build_rollout_state_payload(
         queue_profile_path=queue_profile_path,
         queue_items=queue_items,
@@ -667,6 +788,11 @@ def run_supervisor(
         selected_action=selected_action,
         execution_result=execution_result,
     )
+    if parallel_results:
+        payload["parallel_execution"] = {
+            "parallel_count": len(parallel_results),
+            "results": parallel_results,
+        }
     _write_json(state_json_path, payload)
     _write_markdown(state_md_path, render_rollout_decision_markdown(payload))
     return payload
