@@ -218,15 +218,15 @@
       "type": "file"
     },
     {
-      "path": "src/book_agent/services/bootstrap.py",
-      "accessCount": 8,
-      "lastAccessed": 1775507297285,
+      "path": "scripts/run_real_book_live.py",
+      "accessCount": 9,
+      "lastAccessed": 1775507837227,
       "type": "file"
     },
     {
-      "path": "scripts/run_real_book_live.py",
-      "accessCount": 7,
-      "lastAccessed": 1775503940534,
+      "path": "src/book_agent/services/bootstrap.py",
+      "accessCount": 8,
+      "lastAccessed": 1775507297285,
       "type": "file"
     },
     {
