@@ -409,6 +409,12 @@ def render_markdown(
                 if line and len(line) > 3:
                     heading_texts.add(line)
 
+    # Chapters without heading blocks in the DB — insert synthetic heading before X.1
+    _missing_chapters: dict[str, str] = {
+        "8.1": "8 大语言模型的实际应用",
+        "9.1": "9 构建与使用大语言模型的伦理考量",
+    }
+
     # Pre-pass 1: mark captions that are immediately after images
     for i in range(len(blocks) - 1):
         if blocks[i].block_type == "image" and blocks[i + 1].block_type == "caption":
@@ -539,6 +545,18 @@ def render_markdown(
                 lines.append("")
                 in_list = False
             heading_text = text.replace("\n", " ").strip()
+
+            # Synthesize missing chapter headings for chapters 8 and 9
+            # These don't have heading blocks in the DB, so insert before X.1
+            sec_prefix = re.match(r'^(\d+\.\d+)', heading_text)
+            if sec_prefix:
+                sec_key = sec_prefix.group(1)
+                if sec_key in _missing_chapters:
+                    ch_title = _missing_chapters.pop(sec_key)
+                    lines.append("")
+                    lines.append("")
+                    lines.append(f"# {ch_title}")
+                    lines.append("")
             # Clean bold markers around section numbers: **2.2** → 2.2
             heading_text = re.sub(r'\*\*(\d+(?:\.\d+)*)\*\*', r'\1', heading_text)
             heading_text = re.sub(r'^\*\*(.+)\*\*$', r'\1', heading_text)  # fully bolded heading
@@ -625,19 +643,74 @@ def render_markdown(
             if sec_num:
                 rendered_heading_nums.add(sec_num)
 
-            # If heading ends with colon, check if next block continues the title
-            if heading_text.rstrip().endswith(('：', ':')) and i + 1 < len(blocks):
+            # If heading ends with colon or is truncated, merge with next block
+            if i + 1 < len(blocks):
                 next_b = blocks[i + 1]
                 if next_b.block_type == "paragraph" and next_b.target_text:
                     next_txt = _clean_text(next_b.target_text).strip()
-                    if next_txt and len(next_txt) < 60:
+                    should_merge = False
+                    # Case 1: heading ends with colon (title continuation)
+                    if heading_text.rstrip().endswith(('：', ':')):
+                        if next_txt and len(next_txt) < 60:
+                            should_merge = True
+                    if should_merge:
                         heading_text = heading_text.rstrip() + next_txt
                         merged_into.add(i + 1)
+
+            # Fix truncated headings where PDF parser only captured first word
+            # These have very short titles (1-2 Chinese chars after section number)
+            # Supplement from the English source text
+            _TRUNCATED_HEADING_MAP = {
+                "5.4.3 修改": "5.4.3 在推理阶段修改模型预测",
+                "6.1.1 提升": "6.1.1 提升代码生成能力",
+                "6.2.2 辅助": "6.2.2 辅助大语言模型理解数字",
+                "7.2.3 优化": "7.2.3 优化与改进",
+            }
+            if heading_text in _TRUNCATED_HEADING_MAP:
+                heading_text = _TRUNCATED_HEADING_MAP[heading_text]
+
+            # Known chapter titles without numbers — map to chapter number
+            _CHAPTER_TITLE_MAP = {
+                "宏观视角": "1",
+                "大语言模型如何学习": "4",
+                "如何约束大语言模型的行为": "5",
+            }
+            for title_key, ch_num in _CHAPTER_TITLE_MAP.items():
+                if heading_text.startswith(title_key):
+                    heading_text = f"{ch_num} {heading_text}"
+                    break
+
+            # Derive heading level from section number pattern instead of
+            # relying on PDF heading_level (which is often wrong):
+            #   "3" (chapter) → #
+            #   "3.1" → ##
+            #   "3.1.1" → ###
+            #   "3.1.1.1" → ####
+            #   No number (front matter, sidebar) → use heading_level from DB
+            sec_m = re.match(r'^(\d+(?:\.\d+)*)', heading_text)
+            if sec_m:
+                sec = sec_m.group(1)
+                dot_count = sec.count('.')
+                if dot_count == 0:
+                    # Single number = chapter heading → #
+                    derived_level = 1
+                elif dot_count == 1:
+                    derived_level = 2
+                elif dot_count == 2:
+                    derived_level = 3
+                else:
+                    derived_level = 4
+            elif re.match(r'^第[一二三四五六七八九十\d]+章', heading_text):
+                # Chinese chapter marker → #
+                derived_level = 1
+            else:
+                # No section number — use DB level, but cap sidebar/callout headings
+                derived_level = block.heading_level if block.heading_level > 0 else 2
 
             # Extra spacing before headings for breathing room
             lines.append("")
             lines.append("")
-            prefix = _heading_prefix(block.heading_level)
+            prefix = "#" * max(1, min(derived_level, 4)) + " "
             lines.append(f"{prefix}{heading_text}")
             lines.append("")
             prev_type = "heading"
