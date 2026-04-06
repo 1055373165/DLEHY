@@ -389,24 +389,85 @@ def render_markdown(
     # Track when we've passed the "参考文献" / "索引" section (back matter)
     passed_references = False
 
-    # Pre-pass: mark captions that are immediately after images
+    # Pre-pass 1: mark captions that are immediately after images
     for i in range(len(blocks) - 1):
         if blocks[i].block_type == "image" and blocks[i + 1].block_type == "caption":
             consumed_caption_ids.add(blocks[i + 1].block_id)
 
+    # Pre-pass 2: merge consecutive paragraph blocks that are split mid-sentence.
+    # When a translated paragraph ends without sentence-ending punctuation and the
+    # next block is also a translated paragraph, merge them into one.
+    _SENTENCE_ENDERS = set('。！？；…」』"）.!?;)')
+    merged_into: set[int] = set()  # indices that were merged into a previous block
+    for i in range(len(blocks) - 1):
+        if i in merged_into:
+            continue
+        b = blocks[i]
+        if b.block_type not in ("paragraph",) or not b.target_text:
+            continue
+        txt = _clean_text(b.target_text).rstrip()
+        if not txt:
+            continue
+        # Check if text ends mid-sentence (no sentence-ending punctuation)
+        if txt[-1] in _SENTENCE_ENDERS:
+            continue
+        # Look ahead: merge consecutive translated paragraph continuations
+        j = i + 1
+        while j < len(blocks):
+            nb = blocks[j]
+            if nb.block_type not in ("paragraph",):
+                break
+            # Skip blocks without translation (stray page numbers etc.)
+            if not nb.target_text:
+                j += 1
+                continue
+            ntxt = _clean_text(nb.target_text)
+            if not ntxt or not ntxt.strip():
+                j += 1
+                continue
+            # Skip stray fragments (page headers, short labels) — don't merge them
+            if _is_stray_fragment(ntxt):
+                merged_into.add(j)  # also suppress standalone rendering
+                j += 1
+                continue
+            # Don't merge very short text that's likely a header/label, not continuation
+            if len(ntxt.strip()) < 10:
+                break
+            # Merge: append to current block's target_text
+            b.target_text = b.target_text.rstrip() + ntxt.strip()
+            merged_into.add(j)
+            # Check if merged text now ends with sentence punctuation
+            merged_clean = _clean_text(b.target_text).rstrip()
+            if merged_clean and merged_clean[-1] in _SENTENCE_ENDERS:
+                break
+            j += 1
+
     for i, block in enumerate(blocks):
+        # Skip blocks that were merged into a previous block
+        if i in merged_into:
+            continue
+
         bt = block.block_type
 
-        # Use translation if available, otherwise fall back to source for protected content
+        # Use translation if available; for untranslated content, SKIP paragraphs
+        # (don't show raw English in a Chinese document). Only keep English for
+        # structural/protected content types (code, equations, tables, images).
         text = ""
         if block.target_text:
             text = _clean_text(block.target_text)
-        elif block.protected_policy in ("protect", "mixed") or bt in ("code", "equation", "table", "image"):
+        elif bt in ("code", "equation", "table", "image"):
+            # These content types keep English source (code shouldn't be translated)
             text = _clean_text(block.source_text)
         elif bt == "heading":
+            # Headings: keep English as fallback (structural markers)
+            text = _clean_text(block.source_text)
+        elif bt == "caption":
+            # Captions: keep English as fallback (tied to images)
             text = _clean_text(block.source_text)
         else:
-            text = _clean_text(block.source_text)
+            # Untranslated paragraph/footnote/list_item: SKIP entirely
+            # (even if protected_policy=protect — we don't show raw English)
+            continue
 
         if not text and bt != "image":
             continue
@@ -503,6 +564,8 @@ def render_markdown(
             if sec_num:
                 rendered_heading_nums.add(sec_num)
 
+            # Extra spacing before headings for breathing room
+            lines.append("")
             lines.append("")
             prefix = _heading_prefix(block.heading_level)
             lines.append(f"{prefix}{heading_text}")
@@ -521,14 +584,17 @@ def render_markdown(
             # Check if this is actually prose misclassified as code
             source_text = _clean_text(block.source_text)
             if not _is_real_code(source_text):
-                # Treat as paragraph
-                if text:
-                    lines.append(text)
-                    lines.append("")
+                # It's actually prose — only show if we have a Chinese translation
+                if block.target_text:
+                    zh_text = _clean_text(block.target_text)
+                    if zh_text:
+                        lines.append(zh_text)
+                        lines.append("")
+                # Skip untranslated English prose in fake-code blocks
                 prev_type = "paragraph"
             else:
                 lang = _detect_code_language(source_text)
-                # For code: always use source text (code shouldn't be translated)
+                # For real code: always use source text (code shouldn't be translated)
                 lines.append(f"```{lang}")
                 lines.append(source_text)
                 lines.append("```")
@@ -641,16 +707,22 @@ def render_markdown(
                 in_list = False
             para_text = text.strip()
             if para_text and not _is_stray_fragment(para_text):
-                lines.append(para_text)
-                lines.append("")
+                # Split multi-paragraph blocks at newlines → separate paragraphs
+                # Each sub-paragraph gets its own blank line for breathing room
+                sub_paragraphs = [p.strip() for p in para_text.split("\n") if p.strip()]
+                for sp in sub_paragraphs:
+                    if not _is_stray_fragment(sp):
+                        lines.append(sp)
+                        lines.append("")
             prev_type = "paragraph"
 
     if in_list:
         lines.append("")
 
-    # Post-processing: remove excessive blank lines
+    # Post-processing: normalize blank lines for readability
+    # Allow up to 3 blank lines (around headings), collapse anything more
     output = "\n".join(lines)
-    output = re.sub(r'\n{4,}', '\n\n\n', output)
+    output = re.sub(r'\n{5,}', '\n\n\n\n', output)
     return output
 
 
