@@ -52,6 +52,7 @@ class MdBlock:
     image_meta: dict | None  # for image blocks: image_type, image_ext, etc.
     block_id: str
     list_marker: str  # detected list marker: "1.", "2.", "-", "•", etc.
+    bbox: tuple[float, float, float, float] | None = None  # (x0, y0, x1, y1) in PDF points
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +123,9 @@ def load_blocks(conn: sqlite3.Connection) -> list[MdBlock]:
         trans_parts = block_translations.get(b["id"], [])
         target_text = "\n".join(trans_parts) if trans_parts else ""
 
-        # Image metadata
+        # Image metadata + bbox
         image_meta = None
+        bbox = None
         if block_type == "image":
             image_meta = {
                 "image_type": span.get("image_type"),
@@ -132,6 +134,14 @@ def load_blocks(conn: sqlite3.Connection) -> list[MdBlock]:
                 "width": span.get("image_width_px"),
                 "height": span.get("image_height_px"),
             }
+            # Parse bbox from source_bbox_json.regions[0].bbox
+            sbj = span.get("source_bbox_json")
+            if isinstance(sbj, dict):
+                regions = sbj.get("regions", [])
+                if regions and isinstance(regions[0], dict):
+                    raw = regions[0].get("bbox")
+                    if isinstance(raw, (list, tuple)) and len(raw) >= 4:
+                        bbox = (float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))
 
         # Detect list marker
         list_marker = ""
@@ -158,6 +168,7 @@ def load_blocks(conn: sqlite3.Connection) -> list[MdBlock]:
             image_meta=image_meta,
             block_id=b["id"],
             list_marker=list_marker,
+            bbox=bbox,
         ))
 
     return result
@@ -167,18 +178,70 @@ def load_blocks(conn: sqlite3.Connection) -> list[MdBlock]:
 # Image extraction from PDF
 # ---------------------------------------------------------------------------
 
+def _rect_overlap_area(r1: "fitz.Rect", r2: "fitz.Rect") -> float:
+    """Compute intersection area between two fitz.Rect objects."""
+    inter = r1 & r2
+    if inter.is_empty:
+        return 0.0
+    return inter.width * inter.height
+
+
+def _is_valid_bbox(bbox: tuple[float, float, float, float] | None) -> bool:
+    """Check if bbox is valid (positive area, no negative coords)."""
+    if not bbox:
+        return False
+    x0, y0, x1, y1 = bbox
+    return x1 > x0 and y1 > y0 and x0 >= 0 and y0 >= 0
+
+
 def extract_images_from_pdf(
     source_pdf: str,
     blocks: list[MdBlock],
     output_dir: Path,
 ) -> dict[str, str]:
-    """Extract images from PDF for image blocks. Returns block_id → relative path."""
+    """Extract images from PDF for image blocks using bbox-based matching.
+
+    For embedded images: matches block bbox to specific embedded image positions.
+    For vector drawings: renders the page region as a high-DPI pixmap.
+    Uses content-based MD5 dedup to avoid duplicate files.
+
+    Returns block_id → relative path.
+    """
+    import hashlib
+
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
     doc = fitz.open(source_pdf)
     image_paths: dict[str, str] = {}
     extracted = 0
+    seen_hashes: dict[str, str] = {}  # md5 → relative path (content dedup)
+
+    # Pre-compute per-page image xref → rect mapping (cached)
+    _page_img_rects_cache: dict[int, list[tuple[int, "fitz.Rect"]]] = {}
+
+    def _get_page_image_rects(page_idx: int) -> list[tuple[int, "fitz.Rect"]]:
+        """Get (xref, rect) pairs for all embedded images on a page."""
+        if page_idx in _page_img_rects_cache:
+            return _page_img_rects_cache[page_idx]
+        page = doc[page_idx]
+        result = []
+        for img_info in page.get_images(full=True):
+            xref = img_info[0]
+            try:
+                rects = page.get_image_rects(xref)
+                for r in rects:
+                    if not r.is_empty:
+                        result.append((xref, r))
+            except Exception:
+                continue
+        _page_img_rects_cache[page_idx] = result
+        return result
+
+    RENDER_DPI = 200  # High-DPI for vector drawings
+    PADDING_PT = 3    # Small padding in points for vector clip regions
+    # Minimum useful image dimensions (skip tiny 3x3 pixel artifacts)
+    MIN_BBOX_AREA = 100  # square points
 
     for block in blocks:
         if block.block_type != "image" or not block.image_meta:
@@ -188,37 +251,85 @@ def extract_images_from_pdf(
         if page_idx < 0 or page_idx >= len(doc):
             continue
 
-        page = doc[page_idx]
-        page_images = page.get_images(full=True)
-
-        if not page_images:
+        # Validate bbox
+        if not _is_valid_bbox(block.bbox):
+            logger.debug("Skipping image block %s: invalid bbox %s", block.block_id[:8], block.bbox)
             continue
 
-        # Use the first/largest image on the page near this block
-        # For simplicity, extract all images on the page and pick the best match
-        best_img = None
-        best_size = 0
-        for img_info in page_images:
-            xref = img_info[0]
+        x0, y0, x1, y1 = block.bbox
+        bbox_area = (x1 - x0) * (y1 - y0)
+        if bbox_area < MIN_BBOX_AREA:
+            logger.debug("Skipping tiny image block %s: area=%.1f", block.block_id[:8], bbox_area)
+            continue
+
+        block_rect = fitz.Rect(x0, y0, x1, y1)
+        page = doc[page_idx]
+        image_type = (block.image_meta or {}).get("image_type", "embedded_image")
+
+        img_bytes = None
+        ext = "png"
+
+        # Strategy 1: For embedded images, match by bbox overlap
+        if image_type == "embedded_image":
+            img_rects = _get_page_image_rects(page_idx)
+            best_xref = None
+            best_overlap = 0.0
+
+            for xref, img_rect in img_rects:
+                overlap = _rect_overlap_area(block_rect, img_rect)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_xref = xref
+
+            if best_xref is not None:
+                try:
+                    base_image = doc.extract_image(best_xref)
+                    if base_image and base_image.get("image"):
+                        img_bytes = base_image["image"]
+                        ext = base_image.get("ext", "png")
+                except Exception:
+                    pass
+
+        # Strategy 2: Fallback / vector drawings — render page region as pixmap
+        if img_bytes is None:
+            mat = fitz.Matrix(RENDER_DPI / 72, RENDER_DPI / 72)
+            # Add padding and clip to page bounds
+            padded = fitz.Rect(
+                x0 - PADDING_PT, y0 - PADDING_PT,
+                x1 + PADDING_PT, y1 + PADDING_PT,
+            )
+            padded = padded & page.rect  # intersect with page to stay in bounds
+            if padded.is_empty:
+                continue
             try:
-                base_image = doc.extract_image(xref)
-                if base_image and len(base_image.get("image", b"")) > best_size:
-                    best_img = base_image
-                    best_size = len(base_image["image"])
-            except Exception:
+                pix = page.get_pixmap(matrix=mat, clip=padded, alpha=False)
+                img_bytes = pix.tobytes("png")
+                ext = "png"
+            except Exception as e:
+                logger.warning("Failed to render image block %s: %s", block.block_id[:8], e)
                 continue
 
-        if best_img:
-            ext = best_img.get("ext", "png")
-            filename = f"p{block.page_number:03d}-{block.block_id[:8]}.{ext}"
-            img_path = images_dir / filename
-            if not img_path.exists():
-                img_path.write_bytes(best_img["image"])
-                extracted += 1
-            image_paths[block.block_id] = f"images/{filename}"
+        if not img_bytes:
+            continue
+
+        # Content-based dedup via MD5
+        md5 = hashlib.md5(img_bytes).hexdigest()
+        if md5 in seen_hashes:
+            image_paths[block.block_id] = seen_hashes[md5]
+            continue
+
+        filename = f"p{block.page_number:03d}-{block.block_id[:8]}.{ext}"
+        img_path = images_dir / filename
+        img_path.write_bytes(img_bytes)
+        extracted += 1
+
+        rel_path = f"images/{filename}"
+        image_paths[block.block_id] = rel_path
+        seen_hashes[md5] = rel_path
 
     doc.close()
-    logger.info("Extracted %d images from PDF", extracted)
+    logger.info("Extracted %d unique images from PDF (deduped from %d blocks)",
+                extracted, len([b for b in blocks if b.block_type == "image"]))
     return image_paths
 
 
@@ -227,7 +338,11 @@ def link_existing_assets(
     assets_dir: Path,
     output_dir: Path,
 ) -> dict[str, str]:
-    """Link image blocks to existing extracted assets by page number matching.
+    """Link image blocks to existing extracted assets by page + ordinal matching.
+
+    Asset filenames follow pattern: ch02-p019-blk0024.png
+    Matches block ordinal to the blk number in the filename for per-block accuracy.
+    Falls back to best-by-size on the same page if no ordinal match.
 
     Copies assets to output_dir/images/ for self-contained output.
     """
@@ -237,29 +352,49 @@ def link_existing_assets(
     images_out = output_dir / "images"
     images_out.mkdir(parents=True, exist_ok=True)
 
-    # Build page → asset file map
-    asset_files: dict[int, list[Path]] = {}
+    # Build page → list of (ordinal, path) and page → [path] maps
+    asset_by_page_ord: dict[tuple[int, int], Path] = {}
+    asset_by_page: dict[int, list[Path]] = {}
     for f in assets_dir.iterdir():
         if f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".svg"):
             continue
-        m = re.match(r'ch\d+-p(\d+)-blk\d+', f.stem)
+        m = re.match(r'ch\d+-p(\d+)-blk(\d+)', f.stem)
         if m:
             page = int(m.group(1))
-            asset_files.setdefault(page, []).append(f)
+            blk_ord = int(m.group(2))
+            asset_by_page_ord[(page, blk_ord)] = f
+            asset_by_page.setdefault(page, []).append(f)
 
     import shutil
     image_paths: dict[str, str] = {}
+    used_assets: set[Path] = set()
+
     for block in blocks:
         if block.block_type != "image":
             continue
         page = block.page_number
-        candidates = asset_files.get(page, [])
-        if candidates:
-            best = max(candidates, key=lambda f: f.stat().st_size)
-            dest = images_out / best.name
+
+        # Try exact ordinal match first
+        matched = asset_by_page_ord.get((page, block.ordinal))
+
+        # Fall back: find closest ordinal on the same page not yet used
+        if not matched:
+            candidates = [p for p in asset_by_page.get(page, []) if p not in used_assets]
+            if len(candidates) == 1:
+                matched = candidates[0]
+            elif candidates:
+                # Pick the one with closest blk number to block ordinal
+                def _ord_key(f: Path) -> int:
+                    m2 = re.match(r'ch\d+-p\d+-blk(\d+)', f.stem)
+                    return abs(int(m2.group(1)) - block.ordinal) if m2 else 9999
+                matched = min(candidates, key=_ord_key)
+
+        if matched:
+            used_assets.add(matched)
+            dest = images_out / matched.name
             if not dest.exists():
-                shutil.copy2(best, dest)
-            image_paths[block.block_id] = f"images/{best.name}"
+                shutil.copy2(matched, dest)
+            image_paths[block.block_id] = f"images/{matched.name}"
 
     return image_paths
 

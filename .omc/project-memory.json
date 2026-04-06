@@ -206,15 +206,39 @@
   },
   "hotPaths": [
     {
+      "path": "scripts/run_real_book_live.py",
+      "accessCount": 5,
+      "lastAccessed": 1775503773696,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/app/api/routes/documents.py",
+      "accessCount": 4,
+      "lastAccessed": 1775503420786,
+      "type": "file"
+    },
+    {
       "path": "service.sh",
-      "accessCount": 2,
-      "lastAccessed": 1775483861089,
+      "accessCount": 3,
+      "lastAccessed": 1775503388657,
+      "type": "file"
+    },
+    {
+      "path": ".env",
+      "accessCount": 3,
+      "lastAccessed": 1775503475338,
       "type": "file"
     },
     {
       "path": "Dockerfile",
-      "accessCount": 1,
-      "lastAccessed": 1775483843273,
+      "accessCount": 2,
+      "lastAccessed": 1775502749278,
+      "type": "file"
+    },
+    {
+      "path": "dev.sh",
+      "accessCount": 2,
+      "lastAccessed": 1775503387744,
       "type": "file"
     },
     {
@@ -236,12 +260,6 @@
       "type": "file"
     },
     {
-      "path": ".env",
-      "accessCount": 1,
-      "lastAccessed": 1775483845242,
-      "type": "file"
-    },
-    {
       "path": "frontend/package.json",
       "accessCount": 1,
       "lastAccessed": 1775483860960,
@@ -254,9 +272,87 @@
       "type": "file"
     },
     {
-      "path": "dev.sh",
+      "path": "README.md",
       "accessCount": 1,
-      "lastAccessed": 1775489355206,
+      "lastAccessed": 1775502749163,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/cli.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503392430,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/app/main.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503395139,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/core/config.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503395343,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/workers/contracts.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503399451,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/workers/factory.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503399482,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/services/bootstrap.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503399611,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/domain/structure/epub.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503407660,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/app/api/router.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503408047,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/services/workflows.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503411947,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/workers/translator.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503416352,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/services/translation.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503416626,
+      "type": "file"
+    },
+    {
+      "path": "docs/translation-agent-system-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1775503423750,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/workers/providers/openai_compatible.py",
+      "accessCount": 1,
+      "lastAccessed": 1775503426738,
       "type": "file"
     }
   ],

@@ -20,7 +20,8 @@
       "Bash(/Users/smy/project/book-agent/.venv/bin/python -c \"import book_agent\")",
       "Bash(uv run:*)",
       "Bash(chmod +x:*)",
-      "Bash(bash -n /Users/smy/project/book-agent/dev.sh)"
+      "Bash(bash -n /Users/smy/project/book-agent/dev.sh)",
+      "Bash(grep -E \"\\\\.sh$|forge|service|dev\")"
     ]
   }
 }
