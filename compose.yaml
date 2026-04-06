@@ -20,15 +20,19 @@ services:
     build:
       context: .
     container_name: book-agent-app
+    restart: unless-stopped
+    env_file: .env
     environment:
       BOOK_AGENT_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/book_agent
       BOOK_AGENT_EXPORT_ROOT: /app/artifacts/exports
-      BOOK_AGENT_TRANSLATION_BACKEND: echo
     ports:
       - "58000:8000"
     volumes:
-      - ./:/app
-    command: ["uvicorn", "book_agent.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      - app_exports:/app/artifacts/exports
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  app_exports:
