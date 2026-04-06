@@ -3082,7 +3082,13 @@ class PdfTextExtractor(Protocol):
 
 class PyMuPDFTextExtractor:
     def __init__(self, *, image_output_dir: str | Path | None = None) -> None:
-        self._image_output_dir = Path(image_output_dir) if image_output_dir else None
+        if image_output_dir is not None:
+            self._image_output_dir = Path(image_output_dir)
+        else:
+            # Auto-create a temp directory so images are always materialized.
+            import tempfile
+
+            self._image_output_dir = Path(tempfile.mkdtemp(prefix="book-agent-pdf-images-"))
 
     def extract(self, file_path: str | Path) -> PdfExtraction:
         try:
