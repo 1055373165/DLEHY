@@ -282,6 +282,12 @@ def _clean_text(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     # Collapse multiple spaces
     text = re.sub(r'[ \t]{2,}', ' ', text)
+    # Fix malformed bold-italic markers: ***图 → *图  (triple star → single)
+    text = re.sub(r'\*{3,}(图\s*\d)', r'*\1', text)
+    # Clean bold-wrapped section numbers in headings: **2.2** → 2.2
+    text = re.sub(r'\*\*(\d+(?:\.\d+)*)\*\*', r'\1', text)
+    # Strip stray bold markers around punctuation
+    text = re.sub(r'\*\*\s*\*\*', '', text)
     return text.strip()
 
 
@@ -389,6 +395,20 @@ def render_markdown(
     # Track when we've passed the "参考文献" / "索引" section (back matter)
     passed_references = False
 
+    # Pre-pass 0: collect heading texts for dedup against chapter divider paragraphs
+    heading_texts: set[str] = set()
+    for b in blocks:
+        if b.block_type == "heading":
+            ht = _clean_text(b.target_text or b.source_text or "")
+            # Strip number prefixes, chapter markers, bold markers, newlines
+            for line in ht.split("\n"):
+                line = line.strip()
+                line = re.sub(r'^[\d.]+\s*', '', line)
+                line = re.sub(r'^(第[一二三四五六七八九十\d]+章)\s*', '', line)
+                line = re.sub(r'\*\*', '', line).strip()
+                if line and len(line) > 3:
+                    heading_texts.add(line)
+
     # Pre-pass 1: mark captions that are immediately after images
     for i in range(len(blocks) - 1):
         if blocks[i].block_type == "image" and blocks[i + 1].block_type == "caption":
@@ -475,6 +495,37 @@ def render_markdown(
         # Skip stray fragments (page numbers, short repeated labels)
         if bt == "paragraph" and _is_stray_fragment(text):
             continue
+
+        # Convert PDF sidebar markers to Chinese callout labels
+        _SIDEBAR_MAP = {
+            "NOTE": "**注意**",
+            "TIP": "**提示**",
+            "WARNING": "**警告**",
+            "DEFINITION": "**定义**",
+            "IMPORTANT": "**重要**",
+            "SIDEBAR": "",
+        }
+        text_stripped = text.strip()
+        text_upper = text_stripped.upper()
+        if bt in ("paragraph", "heading"):
+            # Case 1: entire block is just a sidebar marker
+            if text_upper in _SIDEBAR_MAP:
+                label = _SIDEBAR_MAP[text_upper]
+                if label:
+                    lines.append(label)
+                    lines.append("")
+                prev_type = "paragraph"
+                continue
+            # Case 2: translation kept the English marker as prefix
+            # e.g. "NOTE\n对人脑结构的..." → strip the marker, prepend Chinese label
+            for marker, label in _SIDEBAR_MAP.items():
+                if text_stripped.startswith(marker + "\n") or text_stripped.startswith(marker + " "):
+                    text = text_stripped[len(marker):].strip()
+                    if label:
+                        lines.append(label)
+                        lines.append("")
+                    break
+
         # Skip footnote-role blocks that are just page references
         if bt == "footnote":
             fn_clean = text.replace("\n", " ").strip()
@@ -488,6 +539,12 @@ def render_markdown(
                 lines.append("")
                 in_list = False
             heading_text = text.replace("\n", " ").strip()
+            # Clean bold markers around section numbers: **2.2** → 2.2
+            heading_text = re.sub(r'\*\*(\d+(?:\.\d+)*)\*\*', r'\1', heading_text)
+            heading_text = re.sub(r'^\*\*(.+)\*\*$', r'\1', heading_text)  # fully bolded heading
+            # Clean bold chapter markers: **第六章** → 第六章
+            heading_text = re.sub(r'\*\*(第[一二三四五六七八九十\d]+章)\*\*', r'\1', heading_text)
+            heading_text = heading_text.strip()
 
             # --- Filter out non-heading content ---
             skip_as_heading = False
@@ -497,7 +554,8 @@ def render_markdown(
                 skip_as_heading = True
 
             # 2. Figure-internal numbered steps: "1 接收", "3 分词"
-            if re.match(r'^\d+\s+\S{1,8}$', heading_text):
+            #    But NOT chapter headings with colon: "2 分词器：大型语言模型如何理解世界"
+            if re.match(r'^\d+\s+\S{1,8}$', heading_text) and not heading_text.rstrip().endswith(('：', ':')):
                 skip_as_heading = True
 
             # 3. Decimal-prefix diagram labels: "0.7 计算损失 神经网络"
@@ -506,10 +564,13 @@ def render_markdown(
                 skip_as_heading = True
 
             # 4. Space-separated short terms (diagram labels): "提示 补全 评分"
+            #    But NOT chapter headings: "2 分词器：" (single digit + meaningful title)
             words = heading_text.split()
             if len(words) >= 2 and all(len(w) <= 6 for w in words) and not re.match(r'^\d+\.\d+', heading_text):
                 if len(heading_text) < 30:
-                    skip_as_heading = True
+                    # Don't skip if it looks like "N Title" (chapter heading)
+                    if not (len(words) == 2 and words[0].isdigit() and len(words[1]) > 2):
+                        skip_as_heading = True
 
             # 5. Multi-concept figure labels with mixed CJK/Latin terms
             #    "大语言模型（LLMs）准确执行任务的能力 CNN XGBoost"
@@ -563,6 +624,15 @@ def render_markdown(
             rendered_headings.add(heading_key)
             if sec_num:
                 rendered_heading_nums.add(sec_num)
+
+            # If heading ends with colon, check if next block continues the title
+            if heading_text.rstrip().endswith(('：', ':')) and i + 1 < len(blocks):
+                next_b = blocks[i + 1]
+                if next_b.block_type == "paragraph" and next_b.target_text:
+                    next_txt = _clean_text(next_b.target_text).strip()
+                    if next_txt and len(next_txt) < 60:
+                        heading_text = heading_text.rstrip() + next_txt
+                        merged_into.add(i + 1)
 
             # Extra spacing before headings for breathing room
             lines.append("")
@@ -630,17 +700,36 @@ def render_markdown(
                 rendered_image_paths.add(img_path)
 
             if img_path:
-                display_alt = alt or caption_text or "图片"
-                # Clean alt text for markdown (no newlines)
-                display_alt = display_alt.replace("\n", " ").strip()
+                # Prefer Chinese caption for alt text; fall back to generic "图片"
+                # (don't use English alt text — this is a Chinese document)
+                if caption_text and re.search(r'[\u4e00-\u9fff]', caption_text):
+                    display_alt = caption_text
+                else:
+                    display_alt = "图片"
+                # Clean alt text for markdown (no newlines, no bold markers)
+                display_alt = display_alt.replace("\n", " ").replace("**", "").strip()
+                display_alt = display_alt.strip("* ").strip()
+                # Truncate long alt text for cleaner markdown
+                if len(display_alt) > 80:
+                    display_alt = display_alt[:77] + "..."
                 lines.append(f"![{display_alt}]({img_path})")
             else:
-                display_alt = alt or caption_text or "（见原书）"
-                lines.append(f"[图片: {display_alt}]")
+                # No extracted image file — skip silently if no Chinese caption.
+                # Only show placeholder if we have a meaningful Chinese caption.
+                if caption_text and re.search(r'[\u4e00-\u9fff]', caption_text):
+                    lines.append(f"> [图片]")
+                else:
+                    # Completely skip untranslated/missing images
+                    prev_type = "image"
+                    continue
 
             if caption_text:
                 clean_caption = caption_text.replace("\n", " ").strip()
-                lines.append(f"*{clean_caption}*")
+                # Strip all bold markers (**) — we'll wrap in single * for italic
+                clean_caption = clean_caption.replace("**", "")
+                clean_caption = clean_caption.strip("* ").strip()
+                if clean_caption:
+                    lines.append(f"*{clean_caption}*")
 
             lines.append("")
             prev_type = "image"
@@ -653,6 +742,11 @@ def render_markdown(
                 continue
             # Standalone caption (not after an image)
             caption = text.replace("\n", " ").strip()
+            # Strip all bold markers — we re-wrap in single * for italic
+            caption = caption.replace("**", "")
+            caption = caption.strip("* ").strip()
+            if not caption:
+                continue
             lines.append(f"*{caption}*")
             lines.append("")
             prev_type = "caption"
@@ -706,6 +800,54 @@ def render_markdown(
                 lines.append("")
                 in_list = False
             para_text = text.strip()
+
+            # Skip figure-internal labels: short text between images
+            # (translated diagram annotations, axis labels, etc.)
+            # A "figure zone" is a region of images + short paragraphs ending
+            # with a caption. We detect it by checking:
+            #   1. Previous rendered block was image (or we just skipped a label)
+            #   2. This paragraph is short (< 40 chars)
+            #   3. Looking ahead, we find an image or caption within the next
+            #      few blocks (skipping other short paragraphs)
+            if para_text and len(para_text) < 40 and prev_type in ("image", "figure_label"):
+                # Check if next non-empty block is also image/caption
+                next_bt = ""
+                for ni in range(i + 1, min(i + 8, len(blocks))):
+                    if ni in merged_into:
+                        continue
+                    nbt = blocks[ni].block_type
+                    if nbt in ("image", "caption"):
+                        next_bt = nbt
+                        break
+                    elif nbt == "paragraph":
+                        nb_txt = _clean_text(blocks[ni].target_text or "")
+                        if nb_txt and len(nb_txt) < 40:
+                            continue  # also short, keep looking
+                        break
+                    else:
+                        break  # non-paragraph, non-image → end of figure zone
+                if next_bt in ("image", "caption"):
+                    # This short text between images is a figure label — skip
+                    # Keep prev_type as "figure_label" so consecutive labels
+                    # are also caught (don't reset to "paragraph")
+                    prev_type = "figure_label"
+                    continue
+
+            # Skip chapter divider paragraphs: "6 超越自然语言处理" that duplicate headings.
+            # These are chapter divider pages in the PDF — short paragraphs starting
+            # with a bare chapter number followed by the chapter title.
+            if para_text and len(para_text) < 50:
+                divider_m = re.match(r'^(\d+)\s+(.+)$', para_text)
+                if divider_m:
+                    divider_title = divider_m.group(2).strip()
+                    # Check against heading texts OR source text pattern
+                    # (source starts with "N Title" where N is chapter number)
+                    src_text = (block.source_text or "").strip()
+                    src_is_divider = bool(re.match(r'^\d+\s+[A-Z]', src_text)) and len(src_text) < 60
+                    if divider_title in heading_texts or src_is_divider:
+                        prev_type = "paragraph"
+                        continue
+
             if para_text and not _is_stray_fragment(para_text):
                 # Split multi-paragraph blocks at newlines → separate paragraphs
                 # Each sub-paragraph gets its own blank line for breathing room
