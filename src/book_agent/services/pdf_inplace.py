@@ -568,6 +568,7 @@ def _test_textbox_fit(
     fontname: str,
     fontsize: float,
     scratch_doc: fitz.Document | None = None,
+    align: int = 0,
 ) -> bool:
     """Test if text fits in a rectangle at the given font size.
 
@@ -582,7 +583,7 @@ def _test_textbox_fit(
             text,
             fontname=fontname,
             fontsize=fontsize,
-            align=fitz.TEXT_ALIGN_LEFT,
+            align=align,
         )
         # Delete the page to keep scratch doc small
         scratch_doc.delete_page(-1)
@@ -602,12 +603,14 @@ def compute_fitting_font_size(
     max_size: float,
     min_ratio: float = _BODY_FONT_RATIO_FLOOR,
     scratch_doc: fitz.Document | None = None,
+    align: int = 0,
 ) -> float:
     """Binary search for the largest font size that fits text in bbox.
 
     Uses fitz scratch page measurement for accurate CJK text layout.
     Returns the fitting font size (may be == max_size if text fits).
     Pass scratch_doc to reuse across multiple calls (significant speedup).
+    align: fitz.TEXT_ALIGN_LEFT (0), TEXT_ALIGN_CENTER (1), TEXT_ALIGN_RIGHT (2), TEXT_ALIGN_JUSTIFY (3).
     """
     min_size = max(max_size * min_ratio, _MIN_FONT_SIZE_ABSOLUTE)
     if min_size >= max_size:
@@ -617,10 +620,12 @@ def compute_fitting_font_size(
     if rect.width < 1 or rect.height < 1:
         return max_size
 
-    width, height = rect.width, rect.height
+    # Allow 10% vertical expansion for CJK text fitting measurement
+    width = rect.width
+    height = rect.height * 1.10
 
     # Quick check: does it fit at max size?
-    if _test_textbox_fit(text, width, height, fontname, max_size, scratch_doc):
+    if _test_textbox_fit(text, width, height, fontname, max_size, scratch_doc, align):
         return max_size
 
     lo, hi = min_size, max_size
@@ -628,7 +633,7 @@ def compute_fitting_font_size(
 
     for _ in range(_FITTER_ITERATIONS):
         mid = (lo + hi) / 2
-        if _test_textbox_fit(text, width, height, fontname, mid, scratch_doc):
+        if _test_textbox_fit(text, width, height, fontname, mid, scratch_doc, align):
             best = mid
             lo = mid
         else:
@@ -735,6 +740,8 @@ def execute_replacement(
 
                 cjk_font = _select_cjk_font(plan.font_name)
                 min_ratio = _HEADING_FONT_RATIO_FLOOR if plan.is_heading else _BODY_FONT_RATIO_FLOOR
+                # Use JUSTIFY for body text (packs CJK tighter), LEFT for headings
+                text_align = fitz.TEXT_ALIGN_LEFT if plan.is_heading else fitz.TEXT_ALIGN_JUSTIFY
 
                 target_size = compute_fitting_font_size(
                     text=plan.target_text,
@@ -743,6 +750,7 @@ def execute_replacement(
                     max_size=plan.font_size,
                     min_ratio=min_ratio,
                     scratch_doc=scratch_doc,
+                    align=text_align,
                 )
 
                 # Record font reduction
@@ -772,14 +780,20 @@ def execute_replacement(
                     b = (plan.color & 0xFF) / 255.0
                     color = (r, g, b)
 
+                # For insertion, allow a small vertical expansion (10%)
+                # to accommodate CJK text which is typically wider/taller
+                insert_rect = fitz.Rect(rect)
+                height_expand = rect.height * 0.10
+                insert_rect.y1 += height_expand
+
                 try:
                     rc = page.insert_textbox(
-                        rect,
+                        insert_rect,
                         plan.target_text,
                         fontname=cjk_font,
                         fontsize=target_size,
                         color=color,
-                        align=fitz.TEXT_ALIGN_LEFT,
+                        align=text_align,
                     )
                     if rc < 0:
                         warnings.append(

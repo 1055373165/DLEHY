@@ -134,49 +134,68 @@ def extract_blocks_with_translations(db_path: str) -> list[_DbBlock]:
             except (json.JSONDecodeError, TypeError):
                 continue
 
-            # Extract page number
-            page_num = None
-            bbox_raw = None
-            source_bbox_json = span_json.get("source_bbox_json")
-            if isinstance(source_bbox_json, dict):
-                regions = source_bbox_json.get("regions")
-                if isinstance(regions, list) and regions:
-                    first_region = regions[0]
-                    if isinstance(first_region, dict):
-                        page_num = first_region.get("page_number")
-                        bbox_raw = first_region.get("bbox")
-            if page_num is None:
-                page_num = span_json.get("source_page_start")
-            if page_num is None:
-                continue
-
-            page_index = page_num - 1  # DB is 1-indexed, PyMuPDF is 0-indexed
-            if page_index < 0:
-                continue
-
-            if bbox_raw is None or not isinstance(bbox_raw, (list, tuple)) or len(bbox_raw) < 4:
-                continue
-
-            bbox = (float(bbox_raw[0]), float(bbox_raw[1]), float(bbox_raw[2]), float(bbox_raw[3]))
-
-            # Get translation
-            trans_parts = block_translations.get(block_id, [])
-            target_text = "\n".join(trans_parts) if trans_parts else ""
-
             # Skip header/footer/toc_entry blocks
             pdf_role = span_json.get("pdf_block_role", "")
             if pdf_role in ("header", "footer", "toc_entry"):
                 continue
 
-            all_blocks.append(_DbBlock(
-                block_id=block_id,
-                page_index=page_index,
-                bbox=bbox,
-                source_text=source_text,
-                target_text=target_text,
-                block_type=block_type,
-                protected_policy=protected_policy,
-            ))
+            # Get translation
+            trans_parts = block_translations.get(block_id, [])
+            target_text = "\n".join(trans_parts) if trans_parts else ""
+
+            # Extract ALL regions (multi-region blocks span multiple areas/pages)
+            source_bbox_json = span_json.get("source_bbox_json")
+            regions = []
+            if isinstance(source_bbox_json, dict):
+                raw_regions = source_bbox_json.get("regions")
+                if isinstance(raw_regions, list):
+                    regions = [r for r in raw_regions if isinstance(r, dict)]
+
+            if not regions:
+                # Fallback to source_page_start with no bbox
+                page_num = span_json.get("source_page_start")
+                if page_num is None:
+                    continue
+                page_index = page_num - 1
+                if page_index < 0:
+                    continue
+                # No bbox available — skip
+                continue
+
+            # Emit one _DbBlock per region. For multi-region blocks,
+            # the translation is placed in the LARGEST region (by area)
+            # and other regions are just redacted.
+            region_entries = []
+            for ri, region in enumerate(regions):
+                rpage = region.get("page_number")
+                rbbox = region.get("bbox")
+                if rpage is None or not isinstance(rbbox, (list, tuple)) or len(rbbox) < 4:
+                    continue
+                page_index = rpage - 1
+                if page_index < 0:
+                    continue
+                bbox = (float(rbbox[0]), float(rbbox[1]), float(rbbox[2]), float(rbbox[3]))
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                region_entries.append((ri, page_index, bbox, area))
+
+            if not region_entries:
+                continue
+
+            # Put translation text in the largest region; other regions
+            # get empty target_text (will just be redacted)
+            largest_ri = max(region_entries, key=lambda e: e[3])[0]
+
+            for ri, page_index, bbox, area in region_entries:
+                region_target = target_text if ri == largest_ri else ""
+                all_blocks.append(_DbBlock(
+                    block_id=f"{block_id}__r{ri}" if ri > 0 else block_id,
+                    page_index=page_index,
+                    bbox=bbox,
+                    source_text=source_text,
+                    target_text=region_target,
+                    block_type=block_type,
+                    protected_policy=protected_policy,
+                ))
 
     conn.close()
     logger.info("Loaded %d blocks from DB (%d with translations)",
