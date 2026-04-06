@@ -207,8 +207,20 @@
   "hotPaths": [
     {
       "path": "src/book_agent/domain/structure/pdf.py",
+      "accessCount": 58,
+      "lastAccessed": 1775507205785,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/services/export.py",
+      "accessCount": 30,
+      "lastAccessed": 1775507436746,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/services/bootstrap.py",
       "accessCount": 8,
-      "lastAccessed": 1775506170487,
+      "lastAccessed": 1775507297285,
       "type": "file"
     },
     {
@@ -218,16 +230,16 @@
       "type": "file"
     },
     {
-      "path": "src/book_agent/services/export.py",
-      "accessCount": 7,
-      "lastAccessed": 1775506166979,
-      "type": "file"
-    },
-    {
       "path": "src/book_agent/domain/structure/epub.py",
       "accessCount": 5,
       "lastAccessed": 1775506154449,
       "type": "file"
+    },
+    {
+      "path": "src",
+      "accessCount": 5,
+      "lastAccessed": 1775507165254,
+      "type": "directory"
     },
     {
       "path": "src/book_agent/app/api/routes/documents.py",
@@ -270,6 +282,24 @@
       "accessCount": 2,
       "lastAccessed": 1775506158012,
       "type": "file"
+    },
+    {
+      "path": "src/book_agent/domain/models",
+      "accessCount": 2,
+      "lastAccessed": 1775507009821,
+      "type": "directory"
+    },
+    {
+      "path": "src/book_agent/services",
+      "accessCount": 2,
+      "lastAccessed": 1775507030859,
+      "type": "directory"
+    },
+    {
+      "path": "src/book_agent",
+      "accessCount": 2,
+      "lastAccessed": 1775507182265,
+      "type": "directory"
     },
     {
       "path": "compose.yaml",
@@ -338,12 +368,6 @@
       "type": "file"
     },
     {
-      "path": "src/book_agent/services/bootstrap.py",
-      "accessCount": 1,
-      "lastAccessed": 1775503399611,
-      "type": "file"
-    },
-    {
       "path": "src/book_agent/app/api/router.py",
       "accessCount": 1,
       "lastAccessed": 1775503408047,
@@ -386,9 +410,9 @@
       "type": "directory"
     },
     {
-      "path": "src",
+      "path": "src/book_agent/domain/models/document.py",
       "accessCount": 1,
-      "lastAccessed": 1775506150798,
+      "lastAccessed": 1775506720516,
       "type": "directory"
     }
   ],

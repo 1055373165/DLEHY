@@ -174,9 +174,11 @@ class ParseService:
         pdf_parser: PDFParser | None = None,
         ocr_pdf_parser: OcrPdfParser | None = None,
         parse_ir_service: ParseIrService | None = None,
+        *,
+        image_output_dir: str | Path | None = None,
     ):
         self.epub_parser = epub_parser or EPUBParser()
-        self.pdf_parser = pdf_parser or PDFParser()
+        self.pdf_parser = pdf_parser or PDFParser(image_output_dir=image_output_dir)
         self.ocr_pdf_parser = ocr_pdf_parser or OcrPdfParser()
         self.parse_ir_service = parse_ir_service or ParseIrService()
 

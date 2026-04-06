@@ -3041,6 +3041,7 @@ class PdfTextBlock:
     font_size_max: float
     font_size_avg: float
     font_names: frozenset[str] = frozenset()
+    raw_text: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -3052,6 +3053,8 @@ class PdfImageBlock:
     height_px: int | None = None
     image_ext: str | None = None
     image_type: str = "embedded_image"
+    materialized_path: str | None = None
+    xref: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -3078,6 +3081,9 @@ class PdfTextExtractor(Protocol):
 
 
 class PyMuPDFTextExtractor:
+    def __init__(self, *, image_output_dir: str | Path | None = None) -> None:
+        self._image_output_dir = Path(image_output_dir) if image_output_dir else None
+
     def extract(self, file_path: str | Path) -> PdfExtraction:
         try:
             import fitz
@@ -3091,6 +3097,8 @@ class PyMuPDFTextExtractor:
             metadata = {key: value for key, value in (document.metadata or {}).items() if value}
             outline_entries = self._extract_outline(document)
             pages: list[PdfPage] = []
+            # Track xrefs already extracted to avoid duplicates across pages.
+            materialized_xrefs: dict[int, str] = {}
 
             for page_index in range(document.page_count):
                 page = document.load_page(page_index)
@@ -3099,22 +3107,33 @@ class PyMuPDFTextExtractor:
                 image_blocks: list[PdfImageBlock] = []
                 for block_number, block in enumerate(text_dict.get("blocks", []), start=1):
                     if block.get("type") == 1:
+                        bbox = tuple(float(value) for value in block.get("bbox", (0, 0, 0, 0)))
+                        width_px = (
+                            int(block["width"])
+                            if isinstance(block.get("width"), (int, float))
+                            else None
+                        )
+                        height_px = (
+                            int(block["height"])
+                            if isinstance(block.get("height"), (int, float))
+                            else None
+                        )
+                        image_ext = str(block["ext"]).strip().lower() if block.get("ext") else None
+                        # Materialize embedded image via xref extraction.
+                        mat_path, xref = self._materialize_embedded_image(
+                            document, page, bbox, page_index + 1, block_number,
+                            materialized_xrefs=materialized_xrefs,
+                        )
                         image_blocks.append(
                             PdfImageBlock(
                                 page_number=page_index + 1,
                                 block_number=block_number,
-                                bbox=tuple(float(value) for value in block.get("bbox", (0, 0, 0, 0))),
-                                width_px=(
-                                    int(block["width"])
-                                    if isinstance(block.get("width"), (int, float))
-                                    else None
-                                ),
-                                height_px=(
-                                    int(block["height"])
-                                    if isinstance(block.get("height"), (int, float))
-                                    else None
-                                ),
-                                image_ext=str(block["ext"]).strip().lower() if block.get("ext") else None,
+                                bbox=bbox,
+                                width_px=width_px,
+                                height_px=height_px,
+                                image_ext=image_ext,
+                                materialized_path=mat_path,
+                                xref=xref,
                             )
                         )
                         continue
@@ -3124,6 +3143,8 @@ class PyMuPDFTextExtractor:
                     span_count = 0
                     font_sizes: list[float] = []
                     font_names_set: set[str] = set()
+                    mono_span_count = 0
+                    total_span_count = 0
                     for line in block.get("lines", []):
                         parts: list[str] = []
                         for span in line.get("spans", []):
@@ -3132,10 +3153,13 @@ class PyMuPDFTextExtractor:
                                 continue
                             parts.append(text)
                             span_count += 1
+                            total_span_count += 1
                             font_sizes.append(float(span.get("size", 0.0) or 0.0))
                             fn = span.get("font", "")
                             if fn:
                                 font_names_set.add(fn)
+                                if _MONOSPACE_FONT_PATTERNS.search(fn):
+                                    mono_span_count += 1
                         normalized_line = _normalize_text("".join(parts))
                         if normalized_line:
                             lines.append(normalized_line)
@@ -3143,6 +3167,25 @@ class PyMuPDFTextExtractor:
                     text = _normalize_multiline_text("\n".join(lines))
                     if not text:
                         continue
+
+                    # For monospace-dominant blocks, capture raw text preserving
+                    # original whitespace (indentation + newlines) via clip extraction.
+                    raw_text: str | None = None
+                    font_names_frozen = frozenset(font_names_set)
+                    is_monospace_dominant = (
+                        total_span_count > 0
+                        and mono_span_count / total_span_count >= 0.7
+                    )
+                    if is_monospace_dominant and len(lines) >= 2:
+                        block_bbox = block.get("bbox", (0, 0, 0, 0))
+                        try:
+                            import fitz as _fitz
+                            clip_rect = _fitz.Rect(*block_bbox)
+                            raw_text = page.get_text("text", clip=clip_rect)
+                            if raw_text:
+                                raw_text = raw_text.rstrip()
+                        except Exception:
+                            raw_text = None
 
                     blocks.append(
                         PdfTextBlock(
@@ -3156,7 +3199,8 @@ class PyMuPDFTextExtractor:
                             font_size_min=min(font_sizes) if font_sizes else 0.0,
                             font_size_max=max(font_sizes) if font_sizes else 0.0,
                             font_size_avg=_safe_mean(font_sizes),
-                            font_names=frozenset(font_names_set),
+                            font_names=font_names_frozen,
+                            raw_text=raw_text,
                         )
                     )
 
@@ -3309,6 +3353,83 @@ class PyMuPDFTextExtractor:
             max(left[2], right[2]),
             max(left[3], right[3]),
         )
+
+    def _materialize_embedded_image(
+        self,
+        document: Any,
+        page: Any,
+        bbox: tuple[float, ...],
+        page_number: int,
+        block_number: int,
+        *,
+        materialized_xrefs: dict[int, str],
+    ) -> tuple[str | None, int | None]:
+        """Extract the embedded image nearest to *bbox* and save to disk.
+
+        Returns ``(materialized_path, xref)`` or ``(None, None)`` when the
+        image output directory is not configured or extraction fails.
+        """
+        if self._image_output_dir is None:
+            return None, None
+
+        try:
+            import fitz
+        except ImportError:
+            return None, None
+
+        try:
+            page_images = page.get_images(full=True)
+        except Exception:
+            return None, None
+
+        if not page_images:
+            return None, None
+
+        # Find the image whose bbox is closest to the block bbox.
+        best_xref: int | None = None
+        best_distance = float("inf")
+        bx0, by0, bx2, by2 = bbox[:4]
+        bcx, bcy = (bx0 + bx2) / 2.0, (by0 + by2) / 2.0
+
+        for img_info in page_images:
+            xref = int(img_info[0])
+            # Fast dedup: if already materialized, reuse path.
+            if xref in materialized_xrefs:
+                return materialized_xrefs[xref], xref
+            # Estimate image position by checking all image instances on page.
+            try:
+                img_rects = page.get_image_rects(img_info)
+            except Exception:
+                img_rects = []
+            for rect in img_rects:
+                cx = (rect.x0 + rect.x1) / 2.0
+                cy = (rect.y0 + rect.y1) / 2.0
+                dist = abs(cx - bcx) + abs(cy - bcy)
+                if dist < best_distance:
+                    best_distance = dist
+                    best_xref = xref
+
+        if best_xref is None:
+            # Fallback: pick the first image on the page.
+            best_xref = int(page_images[0][0])
+
+        if best_xref in materialized_xrefs:
+            return materialized_xrefs[best_xref], best_xref
+
+        try:
+            pix = fitz.Pixmap(document, best_xref)
+            # Convert CMYK/other colour spaces to RGB for broad compatibility.
+            if pix.n - pix.alpha > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            output_dir = self._image_output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"p{page_number:04d}_b{block_number:03d}.png"
+            output_path = output_dir / filename
+            pix.save(str(output_path))
+            materialized_xrefs[best_xref] = str(output_path)
+            return str(output_path), best_xref
+        except Exception:
+            return None, None
 
     def _extract_outline(self, document: Any) -> list[PdfOutlineEntry]:
         outline_entries: list[PdfOutlineEntry] = []
@@ -3863,8 +3984,16 @@ class BasicPdfTextExtractor:
 
 
 class DefaultPdfTextExtractor:
-    def __init__(self, extractors: list[PdfTextExtractor] | None = None):
-        self.extractors = extractors or [PyMuPDFTextExtractor(), BasicPdfTextExtractor()]
+    def __init__(
+        self,
+        extractors: list[PdfTextExtractor] | None = None,
+        *,
+        image_output_dir: str | Path | None = None,
+    ):
+        self.extractors = extractors or [
+            PyMuPDFTextExtractor(image_output_dir=image_output_dir),
+            BasicPdfTextExtractor(),
+        ]
 
     def extract(self, file_path: str | Path) -> PdfExtraction:
         last_error: Exception | None = None
@@ -4359,15 +4488,22 @@ class PdfStructureRecoveryService:
                         metadata["has_monospace_font"] = True
                         if role == "code_like":
                             metadata["detected_by"] = "monospace_font"
-                    recovered_block = _RecoveredBlock(
-                        role=role,
-                        block_type=self._block_type_for_role(role),
-                        text=self._normalized_block_text(
+                    # For code blocks with preserved whitespace, use raw_text
+                    # from clip extraction instead of the normalized version.
+                    if role == "code_like" and raw_block.raw_text:
+                        block_text = raw_block.raw_text
+                        metadata["raw_text"] = raw_block.raw_text
+                    else:
+                        block_text = self._normalized_block_text(
                             raw_block.text,
                             role=role,
                             page_number=page.page_number,
                             page_context=page_context,
-                        ),
+                        )
+                    recovered_block = _RecoveredBlock(
+                        role=role,
+                        block_type=self._block_type_for_role(role),
+                        text=block_text,
                         page_start=page.page_number,
                         page_end=page.page_number,
                         bbox_regions=[
@@ -4402,6 +4538,9 @@ class PdfStructureRecoveryService:
                         "image_height_px": raw_image.height_px,
                     }
                 )
+                if raw_image.materialized_path:
+                    metadata["image_path"] = raw_image.materialized_path
+                    metadata["image_xref"] = raw_image.xref
                 recovered.append(
                     _RecoveredBlock(
                         role="image",
@@ -5176,6 +5315,18 @@ class PdfStructureRecoveryService:
             flags.append("cross_page_repaired")
 
         merged_flags = list(dict.fromkeys(flags + current.flags))
+        merged_metadata = {**previous.metadata, **current.metadata}
+        # When merging code blocks that both carry raw_text, concatenate
+        # preserving the original whitespace from both regions.
+        if code_merge:
+            prev_raw = previous.metadata.get("raw_text")
+            curr_raw = current.metadata.get("raw_text")
+            if prev_raw or curr_raw:
+                merged_metadata["raw_text"] = (
+                    (prev_raw or previous.text).rstrip("\n")
+                    + "\n"
+                    + (curr_raw or current.text).lstrip("\n")
+                )
         return _RecoveredBlock(
             role=previous.role,
             block_type=previous.block_type,
@@ -5186,7 +5337,7 @@ class PdfStructureRecoveryService:
             reading_order_index=previous.reading_order_index,
             parse_confidence=round(min(previous.parse_confidence, current.parse_confidence), 3),
             flags=merged_flags,
-            metadata={**previous.metadata, **current.metadata},
+            metadata=merged_metadata,
             font_size_avg=_safe_mean([previous.font_size_avg, current.font_size_avg]),
             source_path=previous.source_path,
             anchor=previous.anchor,
@@ -7625,8 +7776,10 @@ class PDFParser:
         extractor: PdfTextExtractor | None = None,
         profiler: PdfFileProfiler | None = None,
         recovery_service: PdfStructureRecoveryService | None = None,
+        *,
+        image_output_dir: str | Path | None = None,
     ):
-        self.extractor = extractor or DefaultPdfTextExtractor()
+        self.extractor = extractor or DefaultPdfTextExtractor(image_output_dir=image_output_dir)
         self.profiler = profiler or PdfFileProfiler(self.extractor)
         self.recovery_service = recovery_service or PdfStructureRecoveryService()
 

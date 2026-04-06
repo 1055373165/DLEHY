@@ -7533,26 +7533,41 @@ class ExportService:
             if getattr(image, "block_id", None)
         }
         render_blocks_by_id = {block.block_id: block for block in render_blocks}
-        pdf_image_specs: dict[str, tuple[str, int, list[float]]] = {}
+        relative_path_by_block_id: dict[str, str] = {}
+
+        # Fast path: use images materialized at parse time via image_path.
+        asset_root = output_dir / "assets" / "pdf-images"
+        remaining_blocks: list[MergedRenderBlock] = []
         for block in render_blocks:
             if block.artifact_kind not in {"image", "figure"}:
                 continue
+            materialized_src = str(block.source_metadata.get("image_path") or "").strip()
+            if materialized_src and Path(materialized_src).is_file():
+                asset_root.mkdir(parents=True, exist_ok=True)
+                suffix = Path(materialized_src).suffix or ".png"
+                target_path = asset_root / f"{block.block_id}{suffix}"
+                if not target_path.exists():
+                    shutil.copy2(materialized_src, target_path)
+                relative_path_by_block_id[block.block_id] = f"assets/pdf-images/{block.block_id}{suffix}"
+            else:
+                remaining_blocks.append(block)
+
+        pdf_image_specs: dict[str, tuple[str, int, list[float]]] = {}
+        for block in remaining_blocks:
             crop_spec = self._pdf_asset_crop_spec(block)
             if crop_spec is None:
                 continue
             pdf_image_specs[block.block_id] = crop_spec
 
         if not pdf_image_specs:
-            return {}
+            return relative_path_by_block_id
 
         try:
             import fitz
         except ImportError:
-            return {}
+            return relative_path_by_block_id
 
-        asset_root = output_dir / "assets" / "pdf-images"
         asset_root.mkdir(parents=True, exist_ok=True)
-        relative_path_by_block_id: dict[str, str] = {}
         document = fitz.open(str(pdf_path))
         try:
             for block_id, (spec_kind, page_number, bbox) in pdf_image_specs.items():
