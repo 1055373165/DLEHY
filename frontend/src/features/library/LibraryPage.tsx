@@ -21,8 +21,8 @@ type Feedback = { tone: "success" | "error"; text: string } | null;
 const DOWNLOAD_OPTIONS = [
   { label: "中文版 · HTML", exportType: "merged_html" },
   { label: "中文版 · Markdown", exportType: "merged_markdown" },
-  { label: "对照版 · HTML", exportType: "bilingual_html" },
-  { label: "对照版 · Markdown", exportType: "bilingual_markdown" },
+  { label: "中英文对照版 · HTML", exportType: "bilingual_html" },
+  { label: "中英文对照版 · Markdown", exportType: "bilingual_markdown" },
 ] as const;
 
 export function LibraryPage() {
