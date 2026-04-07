@@ -70,6 +70,8 @@ export function LibraryPage() {
   type ExportKey = typeof DOWNLOAD_OPTIONS[number]["exportType"];
   async function handleDownload(documentId: string, exportType: ExportKey) {
     setOpenMenu(null);
+    const opt = DOWNLOAD_OPTIONS.find((o) => o.exportType === exportType);
+    setFeedback({ tone: "success", text: `正在生成 ${opt?.label ?? exportType}...` });
     try {
       const filename = await downloadDocumentExport(documentId, exportType);
       setFeedback({ tone: "success", text: `Downloaded: ${filename}` });

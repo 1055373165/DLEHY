@@ -237,14 +237,14 @@
     },
     {
       "path": "src",
-      "accessCount": 9,
-      "lastAccessed": 1775547246267,
+      "accessCount": 10,
+      "lastAccessed": 1775548535880,
       "type": "directory"
     },
     {
       "path": "src/book_agent/app/api/routes/documents.py",
-      "accessCount": 8,
-      "lastAccessed": 1775548301354,
+      "accessCount": 10,
+      "lastAccessed": 1775548548482,
       "type": "file"
     },
     {
@@ -282,6 +282,12 @@
       "accessCount": 4,
       "lastAccessed": 1775547184087,
       "type": "directory"
+    },
+    {
+      "path": "src/book_agent/services/workflows.py",
+      "accessCount": 4,
+      "lastAccessed": 1775548510156,
+      "type": "file"
     },
     {
       "path": "service.sh",
@@ -323,12 +329,6 @@
       "path": "dev.sh",
       "accessCount": 2,
       "lastAccessed": 1775503387744,
-      "type": "file"
-    },
-    {
-      "path": "src/book_agent/services/workflows.py",
-      "accessCount": 2,
-      "lastAccessed": 1775505267931,
       "type": "file"
     },
     {

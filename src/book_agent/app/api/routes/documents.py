@@ -1570,10 +1570,25 @@ def download_document_export(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     if not primary_records:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No successful {export_type.value} exports are available for download.",
-        )
+        # No pre-built export — generate on demand
+        try:
+            workflow.export_document(document_id, lookup_type)
+            session.flush()
+            primary_records = workflow.export_repository.list_document_exports_filtered(
+                document_id,
+                export_type=lookup_type,
+                status=ExportStatus.SUCCEEDED,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Export generation failed: {exc}",
+            ) from exc
+        if not primary_records:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No successful {export_type.value} exports are available for download.",
+            )
 
     book_title = safe_title_for_filename(document_display_title(document), wrap_book_quotes=True)
     label_map = {
