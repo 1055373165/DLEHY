@@ -236,16 +236,16 @@
       "type": "file"
     },
     {
+      "path": "src",
+      "accessCount": 9,
+      "lastAccessed": 1775547246267,
+      "type": "directory"
+    },
+    {
       "path": "frontend/src/components/AppLayout.tsx",
       "accessCount": 7,
       "lastAccessed": 1775541204273,
       "type": "file"
-    },
-    {
-      "path": "src",
-      "accessCount": 7,
-      "lastAccessed": 1775546019160,
-      "type": "directory"
     },
     {
       "path": "src/book_agent/domain/structure/epub.py",
@@ -261,8 +261,8 @@
     },
     {
       "path": "src/book_agent/app/api/routes/documents.py",
-      "accessCount": 4,
-      "lastAccessed": 1775503420786,
+      "accessCount": 5,
+      "lastAccessed": 1775547183709,
       "type": "file"
     },
     {
@@ -276,6 +276,12 @@
       "accessCount": 4,
       "lastAccessed": 1775544636029,
       "type": "file"
+    },
+    {
+      "path": "src/book_agent",
+      "accessCount": 4,
+      "lastAccessed": 1775547184087,
+      "type": "directory"
     },
     {
       "path": "service.sh",
@@ -306,12 +312,6 @@
       "accessCount": 3,
       "lastAccessed": 1775541147653,
       "type": "file"
-    },
-    {
-      "path": "src/book_agent",
-      "accessCount": 3,
-      "lastAccessed": 1775545905027,
-      "type": "directory"
     },
     {
       "path": "Dockerfile",

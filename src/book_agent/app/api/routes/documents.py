@@ -161,16 +161,6 @@ def _artifact_media_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-def _build_export_bundle_filename(
-    document_id: str,
-    export_type: ExportType,
-    *,
-    include_related_exports: bool = False,
-) -> str:
-    if include_related_exports and export_type == ExportType.MERGED_HTML:
-        return f"{document_id}-analysis-bundle.zip"
-    return f"{document_id}-{export_type.value}.zip"
-
 
 def _export_sidecar_paths(file_path: Path) -> list[Path]:
     if file_path.suffix.lower() not in {".html", ".md"}:
@@ -222,27 +212,6 @@ def _preferred_archive_name(original_path: str | Path, resolved_path: Path) -> s
         return None
     return original_name
 
-
-def _document_export_download_filename(
-    document,
-    export_type: ExportType,
-    *,
-    file_suffix: str,
-    include_related_exports: bool = False,
-) -> str:
-    book_title = safe_title_for_filename(document_display_title(document), wrap_book_quotes=True)
-    if include_related_exports and export_type == ExportType.MERGED_HTML:
-        return f"{book_title}-整书译制包.zip"
-    label_map = {
-        ExportType.MERGED_HTML: "中文阅读稿",
-        ExportType.MERGED_MARKDOWN: "中文阅读稿-Markdown",
-        ExportType.REBUILT_EPUB: "重建EPUB",
-        ExportType.REBUILT_PDF: "重建PDF",
-        ExportType.BILINGUAL_HTML: "双语章节包",
-        ExportType.REVIEW_PACKAGE: "审校包",
-    }
-    label = label_map.get(export_type, export_type.value)
-    return f"{book_title}-{label}{file_suffix}"
 
 
 def _chapter_export_download_filename(

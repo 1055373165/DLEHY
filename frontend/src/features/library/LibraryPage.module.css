@@ -168,8 +168,14 @@
   white-space: nowrap;
 }
 
-.dlOption:hover {
+.dlOption:hover:not(:disabled) {
   background: var(--bg-hover);
+}
+
+.dlOption:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* ── States ── */
