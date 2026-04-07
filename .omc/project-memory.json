@@ -179,8 +179,8 @@
     },
     {
       "path": "src",
-      "accessCount": 13,
-      "lastAccessed": 1775552265027,
+      "accessCount": 14,
+      "lastAccessed": 1775595742810,
       "type": "directory"
     },
     {
@@ -256,6 +256,12 @@
       "type": "file"
     },
     {
+      "path": "src/book_agent/app/main.py",
+      "accessCount": 5,
+      "lastAccessed": 1775595749224,
+      "type": "file"
+    },
+    {
       "path": "frontend/src/styles/tokens.css",
       "accessCount": 4,
       "lastAccessed": 1775541217026,
@@ -271,12 +277,6 @@
       "path": "src/book_agent/services/translation.py",
       "accessCount": 4,
       "lastAccessed": 1775553823837,
-      "type": "file"
-    },
-    {
-      "path": "src/book_agent/app/main.py",
-      "accessCount": 4,
-      "lastAccessed": 1775571896183,
       "type": "file"
     },
     {
