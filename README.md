@@ -2,6 +2,9 @@
 
 Long-document translation agent for translating English books into high-quality Chinese with sentence-level coverage, traceability, packet-based context management, QA, and rerun control.
 
+<img width="1096" height="666" alt="image" src="https://github.com/user-attachments/assets/e164aa6a-67fa-42a4-8e2b-643041f09bd0" />
+
+
 ## Current Scope
 
 - P1-A: EPUB + low-risk text PDF
