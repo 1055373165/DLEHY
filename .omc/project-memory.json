@@ -207,14 +207,14 @@
   "hotPaths": [
     {
       "path": "src/book_agent/domain/structure/pdf.py",
-      "accessCount": 60,
-      "lastAccessed": 1775509702484,
+      "accessCount": 66,
+      "lastAccessed": 1775540393986,
       "type": "file"
     },
     {
       "path": "src/book_agent/services/export.py",
-      "accessCount": 30,
-      "lastAccessed": 1775507436746,
+      "accessCount": 36,
+      "lastAccessed": 1775540426797,
       "type": "file"
     },
     {
@@ -227,6 +227,12 @@
       "path": "scripts/run_real_book_live.py",
       "accessCount": 10,
       "lastAccessed": 1775509794765,
+      "type": "file"
+    },
+    {
+      "path": "artifacts/real-book-live/gen-ai-software-dev-v1/exports/markdown/GenAI-Software-Dev-zh.md",
+      "accessCount": 10,
+      "lastAccessed": 1775540641278,
       "type": "file"
     },
     {
@@ -266,10 +272,10 @@
       "type": "file"
     },
     {
-      "path": "artifacts/real-book-live/gen-ai-software-dev-v1/exports/markdown/GenAI-Software-Dev-zh.md",
+      "path": "src/book_agent/services",
       "accessCount": 3,
-      "lastAccessed": 1775527783152,
-      "type": "file"
+      "lastAccessed": 1775540478779,
+      "type": "directory"
     },
     {
       "path": "Dockerfile",
@@ -299,12 +305,6 @@
       "path": "src/book_agent/domain/models",
       "accessCount": 2,
       "lastAccessed": 1775507009821,
-      "type": "directory"
-    },
-    {
-      "path": "src/book_agent/services",
-      "accessCount": 2,
-      "lastAccessed": 1775507030859,
       "type": "directory"
     },
     {
@@ -425,6 +425,12 @@
       "path": "src/book_agent/domain/models/document.py",
       "accessCount": 1,
       "lastAccessed": 1775506720516,
+      "type": "directory"
+    },
+    {
+      "path": "artifacts/real-book-live/gen-ai-software-dev-v1",
+      "accessCount": 1,
+      "lastAccessed": 1775540334943,
       "type": "directory"
     }
   ],

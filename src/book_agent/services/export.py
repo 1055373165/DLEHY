@@ -2931,7 +2931,10 @@ class ExportService:
 
         if block.block_type == BlockType.HEADING.value:
             heading_text = target_text or source_text
-            return f"### {heading_text}".strip()
+            # Long blocks misclassified as headings (e.g. chapter description
+            # paragraphs starting with "Chapter N, ...") should render as body.
+            if len(heading_text) <= 150:
+                return f"### {heading_text}".strip()
         list_markdown = self._markdown_list_text(target_text or source_text)
         if block.block_type == BlockType.QUOTE.value:
             parts = [list_markdown or self._markdown_blockquote(target_text or source_text)]

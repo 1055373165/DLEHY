@@ -5053,7 +5053,7 @@ class PdfStructureRecoveryService:
             return "caption"
         if _normalize_outline_title(text) in outline_titles:
             return "heading"
-        if _HEADING_PATTERN.match(text):
+        if _HEADING_PATTERN.match(text) and len(text) <= 150:
             return "heading"
         if (
             raw_block.font_size_max >= page_font_median * 1.25
