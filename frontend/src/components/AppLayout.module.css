@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   AppLayout :: Terminal Shell
+   AppLayout :: Minimal Shell
    ═══════════════════════════════════════════════════════ */
 
 .shell {
@@ -24,26 +24,14 @@
 .logo {
   font-size: var(--text-lg);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--phosphor);
-  text-shadow: var(--glow-text);
-  animation: flicker 8s infinite;
+  color: var(--ink);
   user-select: none;
-}
-
-.logoGlyph {
-  color: var(--text-muted);
-}
-
-.logoText {
-  color: var(--phosphor-bright);
 }
 
 .logoSub {
   font-size: var(--text-xs);
   color: var(--text-muted);
-  letter-spacing: 0.06em;
-  margin-top: var(--sp-1);
+  margin-top: 2px;
   margin-bottom: var(--sp-7);
 }
 
@@ -59,7 +47,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-decoration: none;
@@ -74,39 +62,37 @@
 
 .navActive {
   background: var(--bg-active);
-  color: var(--phosphor-bright);
-  text-shadow: var(--glow-text);
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .navActive::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 25%;
-  bottom: 25%;
-  width: 2px;
-  background: var(--phosphor);
-  box-shadow: var(--glow-phosphor);
-  border-radius: 1px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  background: var(--ink);
+  border-radius: 2px;
 }
 
 .navIcon {
-  font-weight: 700;
-  font-size: var(--text-base);
-  width: 1.2em;
+  font-size: var(--text-sm);
+  width: 1.4em;
   text-align: center;
-  color: var(--phosphor-dim);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .navActive .navIcon {
-  color: var(--phosphor);
+  color: var(--ink);
 }
 
 .navLabel {
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--text-sm);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.02em;
 }
 
 .navZh {
@@ -114,22 +100,17 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   margin-left: auto;
-  letter-spacing: 0;
 }
 
 /* ── Sidebar Footer ── */
 .sidebarFooter {
   margin-top: auto;
   padding-top: var(--sp-5);
+  border-top: 1px solid var(--border);
 }
 
 .divider {
-  color: var(--border-strong);
-  font-size: var(--text-xs);
-  overflow: hidden;
-  white-space: nowrap;
-  line-height: 1;
-  margin-bottom: var(--sp-4);
+  display: none;
 }
 
 .systemLinks {
@@ -144,7 +125,7 @@
 }
 
 .sysLink:hover {
-  color: var(--cyan);
+  color: var(--text-accent);
 }
 
 .healthRow {
@@ -157,30 +138,26 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--gray-400);
   flex-shrink: 0;
 }
 
 .healthDot[data-status="ok"] {
-  background: var(--phosphor);
-  box-shadow: 0 0 6px var(--phosphor-dim);
-  animation: pulse-glow 2s ease infinite;
+  background: var(--green);
 }
 
 .healthDot[data-status="down"] {
   background: var(--red);
-  box-shadow: 0 0 6px var(--red-dim);
 }
 
 .healthDot[data-status="check"] {
   background: var(--amber);
-  animation: blink 1s step-end infinite;
+  animation: pulse-subtle 1.5s ease infinite;
 }
 
 .healthLabel {
   font-size: var(--text-xs);
   color: var(--text-muted);
-  letter-spacing: 0.06em;
 }
 
 /* ── Main Area ── */
@@ -214,17 +191,13 @@
 }
 
 .prompt {
-  color: var(--phosphor);
-  font-weight: 700;
-  text-shadow: var(--glow-text);
-  flex-shrink: 0;
+  display: none;
 }
 
 .pageName {
   font-weight: 600;
-  color: var(--phosphor-bright);
-  letter-spacing: 0.08em;
-  text-shadow: var(--glow-text);
+  color: var(--ink);
+  font-size: var(--text-sm);
   flex-shrink: 0;
 }
 
@@ -240,7 +213,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-cjk);
-  letter-spacing: 0;
 }
 
 .topbarRight {
@@ -252,25 +224,19 @@
 
 .milestone {
   font-size: var(--text-xs);
-  color: var(--amber);
-  letter-spacing: 0.02em;
+  color: var(--text-secondary);
   font-family: var(--font-cjk);
 }
 
 .cursor {
-  display: inline-block;
-  width: 7px;
-  height: 14px;
-  background: var(--phosphor);
-  animation: blink 1s step-end infinite;
-  vertical-align: middle;
+  display: none;
 }
 
 /* ── Content ── */
 .content {
   flex: 1;
   padding: var(--sp-6);
-  animation: scan-in 300ms ease both;
+  animation: fade-in 200ms ease both;
 }
 
 /* ── Mobile ── */
@@ -307,7 +273,7 @@
     position: fixed;
     inset: 0;
     z-index: 99;
-    background: oklch(0 0 0 / 0.6);
+    background: rgba(0, 0, 0, 0.3);
     border: none;
     opacity: 0;
     pointer-events: none;
@@ -322,8 +288,7 @@
 
   .mobileToggle {
     display: block;
-    font-weight: 700;
-    color: var(--phosphor);
+    color: var(--ink);
     font-size: var(--text-sm);
     flex-shrink: 0;
     padding: var(--sp-1) var(--sp-2);

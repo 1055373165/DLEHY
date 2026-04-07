@@ -1,59 +1,59 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
   /* ── Core Palette ── */
-  --black: oklch(0.08 0.005 240);
-  --black-pure: #000000;
-  --void: oklch(0.06 0.008 240);
-  --phosphor: oklch(0.82 0.19 145);
-  --phosphor-dim: oklch(0.62 0.14 145);
-  --phosphor-bright: oklch(0.92 0.22 145);
-  --amber: oklch(0.78 0.16 75);
-  --amber-dim: oklch(0.58 0.12 75);
-  --cyan: oklch(0.80 0.14 200);
-  --cyan-dim: oklch(0.55 0.10 200);
-  --red: oklch(0.65 0.22 25);
-  --red-dim: oklch(0.45 0.15 25);
-  --magenta: oklch(0.65 0.20 330);
+  --ink: #111111;
+  --ink-light: #333333;
+  --gray-900: #1a1a1a;
+  --gray-700: #555555;
+  --gray-500: #888888;
+  --gray-400: #aaaaaa;
+  --gray-300: #cccccc;
+  --gray-200: #e5e5e5;
+  --gray-100: #f2f2f2;
+  --gray-50: #fafafa;
+  --white: #ffffff;
+
+  --blue: #2563eb;
+  --blue-light: #eff6ff;
+  --green: #16a34a;
+  --green-light: #f0fdf4;
+  --amber: #d97706;
+  --amber-light: #fffbeb;
+  --red: #dc2626;
+  --red-light: #fef2f2;
 
   /* ── Semantic Surfaces ── */
-  --bg-root: var(--void);
-  --bg-panel: oklch(0.10 0.006 240);
-  --bg-panel-alt: oklch(0.12 0.008 240);
-  --bg-input: oklch(0.08 0.005 240);
-  --bg-hover: oklch(0.14 0.01 240);
-  --bg-active: oklch(0.16 0.015 145);
-  --bg-selection: oklch(0.20 0.06 145 / 0.4);
+  --bg-root: var(--gray-50);
+  --bg-panel: var(--white);
+  --bg-panel-alt: var(--gray-100);
+  --bg-input: var(--white);
+  --bg-hover: var(--gray-100);
+  --bg-active: var(--gray-100);
+  --bg-selection: #bfdbfe;
 
   /* ── Text ── */
-  --text-primary: oklch(0.88 0.02 145);
-  --text-secondary: oklch(0.62 0.01 200);
-  --text-muted: oklch(0.42 0.008 200);
-  --text-bright: var(--phosphor-bright);
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-700);
+  --text-muted: var(--gray-500);
+  --text-bright: var(--ink);
+  --text-accent: var(--blue);
   --text-amber: var(--amber);
-  --text-cyan: var(--cyan);
+  --text-cyan: var(--blue);
   --text-red: var(--red);
-  --text-inverse: var(--black);
+  --text-inverse: var(--white);
 
   /* ── Borders & Lines ── */
-  --border: oklch(0.25 0.01 200 / 0.5);
-  --border-strong: oklch(0.35 0.02 145 / 0.6);
-  --border-glow: oklch(0.60 0.12 145 / 0.3);
-  --border-amber: oklch(0.50 0.10 75 / 0.4);
-
-  /* ── Glow Effects ── */
-  --glow-phosphor: 0 0 8px oklch(0.70 0.16 145 / 0.3), 0 0 24px oklch(0.60 0.12 145 / 0.1);
-  --glow-amber: 0 0 8px oklch(0.65 0.14 75 / 0.3), 0 0 24px oklch(0.55 0.10 75 / 0.1);
-  --glow-cyan: 0 0 8px oklch(0.65 0.12 200 / 0.3), 0 0 24px oklch(0.55 0.10 200 / 0.1);
-  --glow-red: 0 0 8px oklch(0.55 0.18 25 / 0.3);
-  --glow-text: 0 0 4px oklch(0.70 0.16 145 / 0.25);
+  --border: var(--gray-200);
+  --border-strong: var(--gray-300);
+  --border-accent: var(--blue);
 
   /* ── Status Colors ── */
-  --status-active: var(--phosphor);
-  --status-success: var(--cyan);
+  --status-active: var(--blue);
+  --status-success: var(--green);
   --status-warning: var(--amber);
   --status-danger: var(--red);
-  --status-muted: var(--text-muted);
+  --status-muted: var(--gray-400);
 
   /* ── Spacing (8px base grid) ── */
   --sp-1: 4px;
@@ -69,29 +69,29 @@
   --sp-12: 80px;
 
   /* ── Border Radius ── */
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-pill: 999px;
 
   /* ── Typography ── */
-  --font-mono: "JetBrains Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Fira Code", monospace;
   --font-cjk: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-body: var(--font-mono);
-  --font-display: var(--font-mono);
+  --font-body: var(--font-sans);
+  --font-display: var(--font-sans);
 
-  /* ── Font Sizes (modular scale 1.2) ── */
-  --text-xs: 0.694rem;
-  --text-sm: 0.833rem;
+  /* ── Font Sizes ── */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
   --text-base: 1rem;
-  --text-md: 1.1rem;
-  --text-lg: 1.2rem;
-  --text-xl: 1.44rem;
-  --text-2xl: 1.728rem;
-  --text-3xl: 2.074rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 1.875rem;
+  --text-3xl: 2.25rem;
 
   /* ── Layout ── */
-  --sidebar-width: 240px;
+  --sidebar-width: 220px;
   --topbar-height: 48px;
-  --scanline-opacity: 0.03;
 }

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   StatusBadge :: Terminal LED Indicator
+   StatusBadge :: Status Indicator
    ═══════════════════════════════════════════════════════ */
 
 .badge {
@@ -11,9 +11,7 @@
   border: 1px solid var(--border);
   background: transparent;
   font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -26,46 +24,43 @@
 
 /* ── Tones ── */
 .active {
-  border-color: oklch(0.60 0.12 145 / 0.4);
-  color: var(--phosphor);
+  border-color: var(--blue-light);
+  color: var(--blue);
+  background: var(--blue-light);
 }
 
 .active .dot {
-  background: var(--phosphor);
-  box-shadow: 0 0 6px var(--phosphor-dim);
-  animation: pulse-glow 2s ease infinite;
+  background: var(--blue);
 }
 
 .success {
-  border-color: oklch(0.55 0.10 200 / 0.4);
-  color: var(--cyan);
+  border-color: var(--green-light);
+  color: var(--green);
+  background: var(--green-light);
 }
 
 .success .dot {
-  background: var(--cyan);
-  box-shadow: 0 0 6px var(--cyan-dim);
+  background: var(--green);
 }
 
 .warning {
-  border-color: oklch(0.50 0.10 75 / 0.4);
+  border-color: var(--amber-light);
   color: var(--amber);
+  background: var(--amber-light);
 }
 
 .warning .dot {
   background: var(--amber);
-  box-shadow: 0 0 6px var(--amber-dim);
-  animation: blink 2s step-end infinite;
 }
 
 .danger {
-  border-color: oklch(0.45 0.15 25 / 0.4);
+  border-color: var(--red-light);
   color: var(--red);
+  background: var(--red-light);
 }
 
 .danger .dot {
   background: var(--red);
-  box-shadow: 0 0 6px var(--red-dim);
-  animation: blink 0.8s step-end infinite;
 }
 
 .muted {
@@ -74,5 +69,5 @@
 }
 
 .muted .dot {
-  background: var(--text-muted);
+  background: var(--gray-400);
 }

@@ -1,16 +1,15 @@
 /* ═══════════════════════════════════════════════════════
-   Surface :: Terminal Window Panel
+   Surface :: Content Panel
    ═══════════════════════════════════════════════════════ */
 
 .surface {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
-  animation: scan-in 350ms ease both;
   overflow: hidden;
 }
 
-/* ── Title Bar (like a terminal window header) ── */
+/* ── Title Bar ── */
 .head {
   border-bottom: 1px solid var(--border);
 }
@@ -28,14 +27,13 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--phosphor-dim);
-  box-shadow: 0 0 4px var(--phosphor-dim);
+  background: var(--gray-400);
 }
 
 .eyebrow {
   font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -58,20 +56,16 @@
   margin: 0;
   font-size: var(--text-lg);
   font-weight: 600;
-  color: var(--phosphor-bright);
-  letter-spacing: 0.06em;
-  text-shadow: var(--glow-text);
-  text-transform: uppercase;
+  color: var(--ink);
 }
 
 .description {
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   max-width: 52ch;
   line-height: 1.6;
   font-family: var(--font-cjk);
-  letter-spacing: 0;
 }
 
 .aside {

@@ -46,12 +46,8 @@ export function AppLayout() {
 
       {/* ── Sidebar ── */}
       <aside className={s.sidebar}>
-        <div className={s.logo}>
-          <span className={s.logoGlyph}>[</span>
-          <span className={s.logoText}>BOOK-AGENT</span>
-          <span className={s.logoGlyph}>]</span>
-        </div>
-        <div className={s.logoSub}>Translation Terminal v2.0</div>
+        <div className={s.logo}>Book Agent</div>
+        <div className={s.logoSub}>Translation Studio</div>
 
         <nav className={s.nav}>
           {NAV_ITEMS.map((item) => (
@@ -72,13 +68,12 @@ export function AppLayout() {
         </nav>
 
         <div className={s.sidebarFooter}>
-          <div className={s.divider}>{"─".repeat(28)}</div>
           <div className={s.systemLinks}>
             <a href={SERVICE_LINKS.docs} target="_blank" rel="noopener" className={s.sysLink}>
-              [api-docs]
+              API Docs
             </a>
             <a href={SERVICE_LINKS.openapi} target="_blank" rel="noopener" className={s.sysLink}>
-              [openapi]
+              OpenAPI
             </a>
           </div>
           <div className={s.healthRow}>
@@ -87,7 +82,7 @@ export function AppLayout() {
               data-status={healthLoading ? "check" : health?.status === "ok" ? "ok" : "down"}
             />
             <span className={s.healthLabel}>
-              {healthLoading ? "CHECKING..." : health?.status === "ok" ? "SYS.ONLINE" : "SYS.OFFLINE"}
+              {healthLoading ? "Checking..." : health?.status === "ok" ? "Online" : "Offline"}
             </span>
           </div>
         </div>
@@ -102,14 +97,14 @@ export function AppLayout() {
             onClick={() => setNavOpen((o) => !o)}
             aria-label="Toggle navigation"
           >
-            {navOpen ? "[-]" : "[=]"}
+            {navOpen ? "✕" : "☰"}
           </button>
           <div className={s.topbarLeft}>
             <span className={s.prompt}>$</span>
             <span className={s.pageName}>{activeNav.label}</span>
             {docTitle && (
               <>
-                <span className={s.separator}>::</span>
+                <span className={s.separator}>/</span>
                 <span className={s.docTitle}>{docTitle}</span>
               </>
             )}
