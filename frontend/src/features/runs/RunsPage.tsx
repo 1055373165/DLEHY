@@ -159,7 +159,14 @@ export function RunsPage() {
             </div>
           </>
         ) : (
-          <div className={s.emptyState}>No active run — bootstrap a document first.</div>
+          <div className={s.emptyHero}>
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={s.illustration}>
+              <circle cx="32" cy="32" r="26" />
+              <polygon points="26,20 26,44 46,32" />
+            </svg>
+            <span className={s.emptyTitle}>No active run</span>
+            <span className={s.emptySubtitle}>Bootstrap a document first to start a translation pipeline.</span>
+          </div>
         )}
       </Surface>
 

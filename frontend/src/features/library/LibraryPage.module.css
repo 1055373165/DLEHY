@@ -149,6 +149,32 @@
   text-align: center;
 }
 
+.emptyHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-12) var(--sp-8);
+  text-align: center;
+}
+
+.illustration {
+  color: var(--gray-300);
+}
+
+.emptyTitle {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.emptySubtitle {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 320px;
+}
+
 /* ── Responsive ── */
 @media (max-width: 860px) {
   .filterRow {

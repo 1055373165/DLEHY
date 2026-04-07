@@ -120,33 +120,79 @@ export function WorkspacePage() {
 
   return (
     <div className={s.layout}>
-      {/* ── Upload Row ── */}
-      <div className={s.uploadRow}>
-        <label className={s.fileLabel}>
-          <input
-            type="file"
-            accept=".pdf,.epub"
-            className={s.fileInput}
-            onChange={(e) => {
-              setSelectedFile(e.target.files?.[0] ?? null);
-              setFeedback(null);
-            }}
-          />
-          <span className={s.fileText}>
-            {selectedFile ? selectedFile.name : "Select .pdf / .epub"}
-          </span>
-        </label>
-        <button
-          className="btn"
-          disabled={!selectedFile || uploadPending}
-          onClick={handleUpload}
-        >
-          {uploadPending ? "Uploading..." : "Bootstrap"}
-        </button>
-      </div>
+      {/* ── Upload Hero (when no document loaded) ── */}
+      {!doc && (
+        <div className={s.uploadHero}>
+          <div className={s.uploadIllustration}>
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="16" y="8" width="48" height="64" rx="3" />
+              <path d="M28 8V4a2 2 0 012-2h20a2 2 0 012 2v4" />
+              <line x1="28" y1="28" x2="52" y2="28" />
+              <line x1="28" y1="36" x2="52" y2="36" />
+              <line x1="28" y1="44" x2="44" y2="44" />
+              <path d="M40 56l6-6 6 6" />
+              <line x1="46" y1="50" x2="46" y2="64" />
+            </svg>
+          </div>
+          <h2 className={s.uploadTitle}>载入书稿</h2>
+          <p className={s.uploadSubtitle}>Upload a PDF or EPUB to begin translation</p>
+          <label className={s.fileLabel}>
+            <input
+              type="file"
+              accept=".pdf,.epub"
+              className={s.fileInput}
+              onChange={(e) => {
+                setSelectedFile(e.target.files?.[0] ?? null);
+                setFeedback(null);
+              }}
+            />
+            <span className={s.fileText}>
+              {selectedFile ? selectedFile.name : "Click to select .pdf / .epub file"}
+            </span>
+          </label>
+          <div className={s.uploadActions}>
+            <button
+              className="btn btn-primary"
+              disabled={!selectedFile || uploadPending}
+              onClick={handleUpload}
+            >
+              {uploadPending ? "Uploading..." : "Bootstrap"}
+            </button>
+          </div>
+          {feedback && (
+            <div className={s.feedback} data-tone={feedback.tone}>{feedback.text}</div>
+          )}
+        </div>
+      )}
 
-      {feedback && (
-        <div className={s.feedback} data-tone={feedback.tone}>{feedback.text}</div>
+      {/* ── Compact upload (when document already loaded) ── */}
+      {doc && (
+        <div className={s.compactUpload}>
+          <label className={s.fileLabel}>
+            <input
+              type="file"
+              accept=".pdf,.epub"
+              className={s.fileInput}
+              onChange={(e) => {
+                setSelectedFile(e.target.files?.[0] ?? null);
+                setFeedback(null);
+              }}
+            />
+            <span className={s.fileTextSmall}>
+              {selectedFile ? selectedFile.name : "Select new file..."}
+            </span>
+          </label>
+          <button
+            className="btn btn-sm"
+            disabled={!selectedFile || uploadPending}
+            onClick={handleUpload}
+          >
+            {uploadPending ? "..." : "Bootstrap"}
+          </button>
+          {feedback && (
+            <div className={s.feedback} data-tone={feedback.tone}>{feedback.text}</div>
+          )}
+        </div>
       )}
 
       {/* ── Document Header (dense row) ── */}

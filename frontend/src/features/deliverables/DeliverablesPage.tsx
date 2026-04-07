@@ -67,7 +67,17 @@ export function DeliverablesPage() {
             )}
           </>
         ) : (
-          <div className={s.emptyState}>Load a document to view deliverables.</div>
+          <div className={s.emptyHero}>
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={s.illustration}>
+              <path d="M8 48l8-32h32l8 32" />
+              <rect x="4" y="48" width="56" height="12" rx="2" />
+              <path d="M24 20v-8h16v8" />
+              <line x1="22" y1="36" x2="42" y2="36" />
+              <line x1="26" y1="42" x2="38" y2="42" />
+            </svg>
+            <span className={s.emptyTitle}>Deliverables</span>
+            <span className={s.emptySubtitle}>Load a document to view export assets and download packages.</span>
+          </div>
         )}
       </Surface>
 

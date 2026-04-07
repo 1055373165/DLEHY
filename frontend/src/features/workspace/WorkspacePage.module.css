@@ -5,17 +5,54 @@
   gap: var(--sp-5);
 }
 
-/* ── Upload Row (compact) ── */
-.uploadRow {
+/* ── Upload Hero (centered, prominent) ── */
+.uploadHero {
   display: flex;
-  gap: var(--sp-2);
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: var(--sp-5);
+  padding: var(--sp-10) var(--sp-8);
+  border: 2px dashed var(--gray-300);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  transition: border-color 200ms ease, background 200ms ease;
+  text-align: center;
+  min-height: 320px;
+}
+
+.uploadHero:hover {
+  border-color: var(--ink);
+  background: var(--gray-50);
+}
+
+.uploadIllustration {
+  color: var(--gray-300);
+  margin-bottom: var(--sp-3);
+}
+
+.uploadTitle {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+  font-family: var(--font-cjk);
+}
+
+.uploadSubtitle {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin: 0;
 }
 
 .fileLabel {
-  flex: 1;
   cursor: pointer;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  max-width: 480px;
 }
 
 .fileInput {
@@ -28,20 +65,50 @@
 
 .fileText {
   display: block;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px dashed var(--gray-300);
-  border-radius: var(--radius-sm);
+  width: 100%;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
-  transition: border-color 100ms ease, color 100ms ease;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: var(--text-sm);
+  background: var(--bg-root);
+  transition: border-color 150ms ease, color 150ms ease;
+  text-align: center;
 }
 
 .fileLabel:hover .fileText,
 .fileInput:focus + .fileText {
-  border-color: var(--blue);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.uploadActions {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+/* ── Compact Upload (when doc loaded) ── */
+.compactUpload {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fileTextSmall {
+  display: block;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--gray-300);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition: border-color 100ms ease;
+  cursor: pointer;
+}
+
+.compactUpload .fileLabel:hover .fileTextSmall {
+  border-color: var(--ink);
   color: var(--text-primary);
 }
 

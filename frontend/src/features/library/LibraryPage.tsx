@@ -142,7 +142,19 @@ export function LibraryPage() {
             })}
           </div>
         ) : (
-          <div className={s.emptyState}>No results matching current filters.</div>
+          <div className={s.emptyHero}>
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={s.illustration}>
+              <rect x="8" y="4" width="16" height="56" rx="2" />
+              <rect x="24" y="8" width="16" height="52" rx="2" />
+              <rect x="40" y="4" width="16" height="56" rx="2" />
+              <line x1="13" y1="12" x2="19" y2="12" />
+              <line x1="13" y1="16" x2="19" y2="16" />
+              <line x1="45" y1="12" x2="51" y2="12" />
+              <line x1="45" y1="16" x2="51" y2="16" />
+            </svg>
+            <span className={s.emptyTitle}>No results</span>
+            <span className={s.emptySubtitle}>No documents matching current filters. Try adjusting your search.</span>
+          </div>
         )}
       </Surface>
     </div>

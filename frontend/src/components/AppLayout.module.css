@@ -272,9 +272,10 @@
 /* ── Content ── */
 .content {
   flex: 1;
-  padding: var(--content-pad);
-  max-width: var(--content-max);
-  width: 100%;
+  padding: var(--content-pad) 0;
+  width: 70%;
+  max-width: 1100px;
+  margin: 0 auto;
   animation: fade-in 150ms ease both;
 }
 
