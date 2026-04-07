@@ -213,14 +213,20 @@
     },
     {
       "path": "src/book_agent/services/export.py",
-      "accessCount": 44,
-      "lastAccessed": 1775548223953,
+      "accessCount": 58,
+      "lastAccessed": 1775552299151,
+      "type": "file"
+    },
+    {
+      "path": "src/book_agent/app/api/routes/documents.py",
+      "accessCount": 18,
+      "lastAccessed": 1775552404536,
       "type": "file"
     },
     {
       "path": "src",
-      "accessCount": 11,
-      "lastAccessed": 1775549767792,
+      "accessCount": 13,
+      "lastAccessed": 1775552265027,
       "type": "directory"
     },
     {
@@ -239,12 +245,6 @@
       "path": "artifacts/real-book-live/gen-ai-software-dev-v1/exports/markdown/GenAI-Software-Dev-zh.md",
       "accessCount": 10,
       "lastAccessed": 1775540641278,
-      "type": "file"
-    },
-    {
-      "path": "src/book_agent/app/api/routes/documents.py",
-      "accessCount": 10,
-      "lastAccessed": 1775548548482,
       "type": "file"
     },
     {
