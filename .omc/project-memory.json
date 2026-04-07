@@ -266,6 +266,12 @@
       "type": "file"
     },
     {
+      "path": "artifacts/real-book-live/gen-ai-software-dev-v1/exports/markdown/GenAI-Software-Dev-zh.md",
+      "accessCount": 3,
+      "lastAccessed": 1775527783152,
+      "type": "file"
+    },
+    {
       "path": "Dockerfile",
       "accessCount": 2,
       "lastAccessed": 1775502749278,
