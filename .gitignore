@@ -20,3 +20,4 @@ book_agent.db
 .server.pid
 artifacts/
 .gstack/
+.omc/

@@ -161,8 +161,8 @@
   "hotPaths": [
     {
       "path": "src/book_agent/services/export.py",
-      "accessCount": 77,
-      "lastAccessed": 1775642522834,
+      "accessCount": 86,
+      "lastAccessed": 1775656590526,
       "type": "file"
     },
     {
@@ -173,27 +173,27 @@
     },
     {
       "path": "src/book_agent/app/api/routes/documents.py",
-      "accessCount": 29,
-      "lastAccessed": 1775638039362,
+      "accessCount": 38,
+      "lastAccessed": 1775660764903,
       "type": "file"
-    },
-    {
-      "path": "src",
-      "accessCount": 16,
-      "lastAccessed": 1775638181135,
-      "type": "directory"
-    },
-    {
-      "path": "src/book_agent",
-      "accessCount": 15,
-      "lastAccessed": 1775638177814,
-      "type": "directory"
     },
     {
       "path": "src/book_agent/services/workflows.py",
-      "accessCount": 14,
-      "lastAccessed": 1775627213848,
+      "accessCount": 19,
+      "lastAccessed": 1775653460445,
       "type": "file"
+    },
+    {
+      "path": "src/book_agent",
+      "accessCount": 18,
+      "lastAccessed": 1775652315879,
+      "type": "directory"
+    },
+    {
+      "path": "src",
+      "accessCount": 17,
+      "lastAccessed": 1775660816894,
+      "type": "directory"
     },
     {
       "path": "src/book_agent/services/bootstrap.py",
@@ -244,6 +244,12 @@
       "type": "file"
     },
     {
+      "path": "src/book_agent/core/config.py",
+      "accessCount": 7,
+      "lastAccessed": 1775656858823,
+      "type": "file"
+    },
+    {
       "path": "src/book_agent/domain/structure/epub.py",
       "accessCount": 6,
       "lastAccessed": 1775571919069,
@@ -253,12 +259,6 @@
       "path": "artifacts/real-book-live/principles-ai-agents-v1/exports/markdown/Principles-AI-Agents-zh.md",
       "accessCount": 5,
       "lastAccessed": 1775509893550,
-      "type": "file"
-    },
-    {
-      "path": "src/book_agent/core/config.py",
-      "accessCount": 5,
-      "lastAccessed": 1775571897085,
       "type": "file"
     },
     {
