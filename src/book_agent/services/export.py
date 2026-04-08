@@ -1375,6 +1375,9 @@ class ExportService:
             ExportType.REBUILT_EPUB,
             ExportType.REBUILT_PDF,
         }:
+            is_pdf_source = bundle.document.source_type in {
+                SourceType.PDF_TEXT, SourceType.PDF_MIXED, SourceType.PDF_SCAN,
+            }
             if chapter_status not in {ChapterStatus.QA_CHECKED, ChapterStatus.APPROVED, ChapterStatus.EXPORTED}:
                 blocking_issues, followup_actions = self._open_blocking_followup_actions(bundle.chapter.id)
                 raise ExportGateError(
@@ -1383,27 +1386,31 @@ class ExportService:
                     issue_ids=[issue.id for issue in blocking_issues],
                     followup_actions=followup_actions,
                 )
-            export_alignment_artifacts = self._sync_export_alignment_issues(bundle)
-            if export_alignment_artifacts.issues:
-                raise ExportGateError(
-                    "Chapter "
-                    f"{bundle.chapter.id} has export-time misalignment anomalies and cannot be exported. "
-                    f"Review issues created: {', '.join(issue.id for issue in export_alignment_artifacts.issues)}.",
-                    chapter_id=bundle.chapter.id,
-                    issue_ids=[issue.id for issue in export_alignment_artifacts.issues],
-                    followup_actions=[
-                        ExportFollowupAction(
-                            action_id=action.id,
-                            issue_id=action.issue_id,
-                            action_type=action.action_type.value,
-                            scope_type=action.scope_type.value,
-                            scope_id=action.scope_id,
-                        )
-                        for action in export_alignment_artifacts.actions
-                    ],
-                )
+            if is_pdf_source:
+                export_alignment_artifacts = self._sync_export_alignment_issues(bundle)
+                if export_alignment_artifacts.issues:
+                    raise ExportGateError(
+                        "Chapter "
+                        f"{bundle.chapter.id} has export-time misalignment anomalies and cannot be exported. "
+                        f"Review issues created: {', '.join(issue.id for issue in export_alignment_artifacts.issues)}.",
+                        chapter_id=bundle.chapter.id,
+                        issue_ids=[issue.id for issue in export_alignment_artifacts.issues],
+                        followup_actions=[
+                            ExportFollowupAction(
+                                action_id=action.id,
+                                issue_id=action.issue_id,
+                                action_type=action.action_type.value,
+                                scope_type=action.scope_type.value,
+                                scope_id=action.scope_id,
+                            )
+                            for action in export_alignment_artifacts.actions
+                        ],
+                    )
             render_blocks = self._render_blocks_for_chapter(bundle)
-            export_layout_artifacts = self._sync_export_layout_issues(bundle, render_blocks)
+            if is_pdf_source:
+                export_layout_artifacts = self._sync_export_layout_issues(bundle, render_blocks)
+            else:
+                export_layout_artifacts = ExportIssueSyncArtifacts(issues=[], actions=[])
             if export_layout_artifacts.issues:
                 raise ExportGateError(
                     "Chapter "

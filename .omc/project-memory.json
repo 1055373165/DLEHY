@@ -160,15 +160,15 @@
   },
   "hotPaths": [
     {
-      "path": "src/book_agent/domain/structure/pdf.py",
-      "accessCount": 67,
-      "lastAccessed": 1775571918444,
+      "path": "src/book_agent/services/export.py",
+      "accessCount": 74,
+      "lastAccessed": 1775627064895,
       "type": "file"
     },
     {
-      "path": "src/book_agent/services/export.py",
-      "accessCount": 59,
-      "lastAccessed": 1775571917557,
+      "path": "src/book_agent/domain/structure/pdf.py",
+      "accessCount": 67,
+      "lastAccessed": 1775571918444,
       "type": "file"
     },
     {
@@ -182,6 +182,12 @@
       "accessCount": 14,
       "lastAccessed": 1775595742810,
       "type": "directory"
+    },
+    {
+      "path": "src/book_agent/services/workflows.py",
+      "accessCount": 14,
+      "lastAccessed": 1775627213848,
+      "type": "file"
     },
     {
       "path": "src/book_agent",
@@ -217,12 +223,6 @@
       "path": ".env",
       "accessCount": 10,
       "lastAccessed": 1775596299132,
-      "type": "file"
-    },
-    {
-      "path": "src/book_agent/services/workflows.py",
-      "accessCount": 9,
-      "lastAccessed": 1775553797592,
       "type": "file"
     },
     {
@@ -347,8 +347,8 @@
     },
     {
       "path": "src/book_agent/services/pdf_structure_refresh.py",
-      "accessCount": 2,
-      "lastAccessed": 1775506158012,
+      "accessCount": 3,
+      "lastAccessed": 1775626260106,
       "type": "file"
     },
     {

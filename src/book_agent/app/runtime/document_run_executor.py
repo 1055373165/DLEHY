@@ -153,7 +153,7 @@ class DocumentRunExecutor:
         review_lease_seconds: int = 1800,
         heartbeat_interval_seconds: int = 15,
         default_max_auto_followup_attempts: int = 2,
-        default_max_blocker_repair_rounds: int = 4,
+        default_max_blocker_repair_rounds: int = 10,
         default_max_parallel_workers: int = 8,
     ) -> None:
         self.session_factory = session_factory

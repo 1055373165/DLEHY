@@ -2178,10 +2178,15 @@ class DocumentWorkflowService:
                 executed_actions = candidate_actions[:remaining_attempt_budget]
                 for followup_action in executed_actions:
                     attempted_action_ids.add(followup_action.action_id)
-                    result = self.execute_action(
-                        followup_action.action_id,
-                        run_followup=followup_action.suggested_run_followup,
-                    )
+                    try:
+                        result = self.execute_action(
+                            followup_action.action_id,
+                            run_followup=followup_action.suggested_run_followup,
+                        )
+                    except ValueError:
+                        # Skip actions that are not applicable to this document type
+                        # (e.g. PDF structure refresh on EPUB documents)
+                        continue
                     auto_followup_executions.append(
                         ExportAutoFollowupExecution(
                             action_id=followup_action.action_id,
@@ -2239,7 +2244,7 @@ class DocumentWorkflowService:
             self._persist_document_export_runtime_v2_context(
                 document_id=document_id,
                 export_type=export_type,
-                export_records=[artifacts.export_record, markdown_artifacts.export_record],
+                export_records=[artifacts.export_record],
                 runtime_v2_context=runtime_v2_context,
             )
             return DocumentExportResult(
