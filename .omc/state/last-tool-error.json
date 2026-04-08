@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\".venv/bin/python -c \\\"\\nfrom sqlalchemy import create_engine, text\\nimport json\\ne = create_engine('postgresql+psycopg://postgres:postgres@localhost:5433/book_agent')\\nwith e.connect() as ...",
-  "error": "Exit code 1\nTraceback (most recent call last):\n  File \"/Users/smy/project/book-agent/.venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py\", line 1967, in _exec_single_context\n    self.dialect.do_execute(\n    ~~~~~~~~~~~~~~~~~~~~~~~^\n        cursor, str_statement, effective_parameters, context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/smy/project/book-agent/.venv/lib/python3.13/site-packages/sqlalchemy/engine/default.py\", line 952, in do_execu...",
-  "timestamp": "2026-04-08T05:33:07.876Z",
+  "tool_input_preview": "{\"command\":\"psql -h localhost -p 5433 -U postgres -d book_agent -c \\\"UPDATE document_runs SET status = 'succeeded', stop_reason = NULL WHERE id = 'ff9eb4c5-da12-4201-86f0-92318c6c485c'; SELECT status,...",
+  "error": "Exit code 127\n(eval):1: command not found: psql",
+  "timestamp": "2026-04-08T08:06:13.929Z",
   "retry_count": 1
 }
