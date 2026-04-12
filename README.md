@@ -49,8 +49,7 @@ cp .env.example .env   # set OPENAI_API_KEY=sk-...
 
 ## Architecture
 
-![d2 (3)](https://github.com/user-attachments/assets/58e753a6-0122-4777-8199-2c480c8155eb)
-
+![d2 (4)](https://github.com/user-attachments/assets/b2704e3f-8872-46e9-b12b-b64487af9a12)
 
 **The key insight:** nothing in the data plane holds state. Kill any worker, any controller, any backend process — the next reconcile tick reads PostgreSQL, sees what's missing, and resumes. No orchestration bus, no task queue, no in-memory state to lose.
 
